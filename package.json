@@ -59,6 +59,14 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "VIDORA"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "vidoraofficial",
+        "repo": "VIDORA",
+        "releaseType": "release"
+      }
+    ]
   }
 }
