@@ -1,0 +1,17 @@
+node_modules/
+dist/
+release-final/
+release-vidora/
+VIDORA-Release/
+VIDORA-Backups/
+security-backups/
+venv/
+*.log
+*.tmp
+.env
+.env.*
+!.env.example
+backend/VideoDownloaderBackend.old-active.exe
+backend/VideoDownloaderBackend.old.exe
+backend/VideoDownloaderBackend.pre-bulk.exe
+backend/VideoDownloaderBackend.previous.exe
