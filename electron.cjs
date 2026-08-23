@@ -9,6 +9,7 @@ const path = require('path')
 const fs = require('fs')
 const { spawn } = require('child_process')
 const { pathToFileURL } = require('url')
+const { autoUpdater } = require('electron-updater')
 
 const APP_ID = 'com.vidora.desktop'
 const APP_TITLE = 'VIDORA'
@@ -30,9 +31,13 @@ let backendProcess = null
 
 const isDev = !app.isPackaged
 
+let updaterInitialized = false
+let updateCheckInProgress = false
+let updateDownloaded = false
+
 /* =========================================================
    PATHS
-   ========================================================= */
+========================================================= */
 
 function getFrontendPath() {
   return path.join(
@@ -66,10 +71,6 @@ function getIconPath() {
   )
 }
 
-/*
- * The browser-rendered logo will use the same
- * icon file that Windows uses for the app.
- */
 function getRendererIconURL() {
   const iconPath = getIconPath()
 
@@ -78,9 +79,7 @@ function getRendererIconURL() {
   }
 
   try {
-    return pathToFileURL(
-      iconPath,
-    ).href
+    return pathToFileURL(iconPath).href
   } catch {
     return ''
   }
@@ -88,7 +87,7 @@ function getRendererIconURL() {
 
 /* =========================================================
    BACKEND
-   ========================================================= */
+========================================================= */
 
 function startBackend() {
   if (backendProcess) {
@@ -163,7 +162,7 @@ function stopBackend() {
 
 /* =========================================================
    SECURITY
-   ========================================================= */
+========================================================= */
 
 function isMainWindowContents(contents) {
   return (
@@ -194,9 +193,6 @@ function isAllowedNavigation(url) {
       )
     }
 
-    /*
-     * Development Vite URL.
-     */
     if (isDev) {
       return (
         parsed.hostname ===
@@ -214,7 +210,7 @@ function isAllowedNavigation(url) {
 
 /* =========================================================
    SIDEBAR / RENDERER BRANDING
-   ========================================================= */
+========================================================= */
 
 async function applyRendererBranding() {
   if (!mainWindow) {
@@ -248,10 +244,6 @@ async function applyRendererBranding() {
         image.src = iconURL
       }
 
-      /*
-       * Also handle images that may be created
-       * after the initial render.
-       */
       if (!window.__VIDORA_LOGO_OBSERVER__) {
         const observer =
           new MutationObserver(() => {
@@ -314,12 +306,337 @@ async function applyRendererBranding() {
 }
 
 /* =========================================================
+   UPDATE IPC STATE
+========================================================= */
+
+function sendUpdateEvent(
+  event,
+  payload = {},
+) {
+  if (!mainWindow) {
+    return
+  }
+
+  if (
+    mainWindow.webContents.isDestroyed()
+  ) {
+    return
+  }
+
+  mainWindow.webContents.send(
+    'updater:event',
+    {
+      event,
+      ...payload,
+    },
+  )
+}
+
+/* =========================================================
+   AUTO UPDATER
+========================================================= */
+
+function initializeAutoUpdater() {
+  if (
+    updaterInitialized ||
+    isDev
+  ) {
+    return
+  }
+
+  updaterInitialized = true
+
+  /*
+   * We want the VIDORA React page to control
+   * when an update check happens.
+   */
+  autoUpdater.autoDownload = true
+
+  /*
+   * Do not unexpectedly install while the user
+   * is working. React will explicitly request
+   * installation after update-downloaded.
+   */
+  autoUpdater.autoInstallOnAppQuit = false
+
+  /*
+   * electron-updater's GitHub provider will use
+   * the publish configuration from package.json.
+   */
+  autoUpdater.on(
+    'checking-for-update',
+    () => {
+      updateCheckInProgress = true
+
+      sendUpdateEvent(
+        'checking-for-update',
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'update-available',
+    (info) => {
+      updateCheckInProgress = true
+
+      sendUpdateEvent(
+        'update-available',
+        {
+          version:
+            info?.version ||
+            null,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'update-not-available',
+    (info) => {
+      updateCheckInProgress = false
+      updateDownloaded = false
+
+      sendUpdateEvent(
+        'update-not-available',
+        {
+          version:
+            info?.version ||
+            null,
+          currentVersion:
+            app.getVersion(),
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'download-progress',
+    (progress) => {
+      sendUpdateEvent(
+        'download-progress',
+        {
+          percent:
+            Number.isFinite(
+              progress?.percent,
+            )
+              ? progress.percent
+              : 0,
+
+          bytesPerSecond:
+            progress?.bytesPerSecond ||
+            0,
+
+          total:
+            progress?.total ||
+            0,
+
+          transferred:
+            progress?.transferred ||
+            0,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'update-downloaded',
+    (info) => {
+      updateCheckInProgress = false
+      updateDownloaded = true
+
+      sendUpdateEvent(
+        'update-downloaded',
+        {
+          version:
+            info?.version ||
+            null,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'update-cancelled',
+    (info) => {
+      updateCheckInProgress = false
+      updateDownloaded = false
+
+      sendUpdateEvent(
+        'update-cancelled',
+        {
+          version:
+            info?.version ||
+            null,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'error',
+    (error) => {
+      updateCheckInProgress = false
+
+      console.error(
+        '[VIDORA] updater error:',
+        error,
+      )
+
+      sendUpdateEvent(
+        'error',
+        {
+          message:
+            error?.message ||
+            'Update failed.',
+        },
+      )
+    },
+  )
+
+  console.log(
+    '[VIDORA] auto updater initialized',
+  )
+}
+
+/* =========================================================
+   UPDATE IPC HANDLERS
+========================================================= */
+
+ipcMain.handle(
+  'updater:check',
+  async () => {
+    if (isDev) {
+      return {
+        status: 'disabled-in-development',
+        version:
+          app.getVersion(),
+      }
+    }
+
+    if (updateCheckInProgress) {
+      return {
+        status: 'checking',
+        version:
+          app.getVersion(),
+      }
+    }
+
+    try {
+      const result =
+        await autoUpdater.checkForUpdates()
+
+      if (!result) {
+        return {
+          status:
+            'unavailable',
+          version:
+            app.getVersion(),
+        }
+      }
+
+      const available =
+        Boolean(
+          result.updateInfo &&
+            result.updateInfo.version &&
+            result.updateInfo.version !==
+              app.getVersion(),
+        )
+
+      return {
+        status:
+          available
+            ? 'available'
+            : 'current',
+
+        currentVersion:
+          app.getVersion(),
+
+        availableVersion:
+          result
+            ?.updateInfo
+            ?.version ||
+          null,
+      }
+    } catch (error) {
+      console.error(
+        '[VIDORA] update check failed:',
+        error,
+      )
+
+      return {
+        status: 'error',
+        message:
+          error?.message ||
+          'Could not check for updates.',
+      }
+    }
+  },
+)
+
+ipcMain.handle(
+  'updater:install',
+  async () => {
+    if (isDev) {
+      return {
+        status:
+          'disabled-in-development',
+      }
+    }
+
+    if (!updateDownloaded) {
+      return {
+        status:
+          'not-downloaded',
+      }
+    }
+
+    try {
+      /*
+       * This restarts VIDORA and launches the
+       * downloaded NSIS update installer.
+       */
+      autoUpdater.quitAndInstall(
+        false,
+        true,
+      )
+
+      return {
+        status: 'installing',
+      }
+    } catch (error) {
+      console.error(
+        '[VIDORA] update install failed:',
+        error,
+      )
+
+      return {
+        status: 'error',
+        message:
+          error?.message ||
+          'Could not install the update.',
+      }
+    }
+  },
+)
+
+/*
+ * Allow React to retrieve the current version
+ * without exposing Node.js directly.
+ */
+ipcMain.handle(
+  'app:get-version',
+  () => app.getVersion(),
+)
+
+/* =========================================================
    WINDOW
-   ========================================================= */
+========================================================= */
 
 function createWindow() {
   if (mainWindow) {
-    if (mainWindow.isMinimized()) {
+    if (
+      mainWindow.isMinimized()
+    ) {
       mainWindow.restore()
     }
 
@@ -337,7 +654,9 @@ function createWindow() {
     iconPath,
   )
 
-  if (!fs.existsSync(iconPath)) {
+  if (
+    !fs.existsSync(iconPath)
+  ) {
     console.warn(
       '[VIDORA] icon not found:',
       iconPath,
@@ -411,7 +730,7 @@ function createWindow() {
 
   /* =======================================================
      TITLE
-     ======================================================= */
+  ======================================================= */
 
   mainWindow.webContents.on(
     'page-title-updated',
@@ -428,7 +747,7 @@ function createWindow() {
 
   /* =======================================================
      NAVIGATION SECURITY
-     ======================================================= */
+  ======================================================= */
 
   mainWindow.webContents.on(
     'will-navigate',
@@ -486,7 +805,7 @@ function createWindow() {
 
   /* =======================================================
      LOAD FRONTEND
-     ======================================================= */
+  ======================================================= */
 
   const frontendPath =
     getFrontendPath()
@@ -496,7 +815,9 @@ function createWindow() {
     frontendPath,
   )
 
-  if (!fs.existsSync(frontendPath)) {
+  if (
+    !fs.existsSync(frontendPath)
+  ) {
     dialog.showErrorBox(
       APP_TITLE,
       `Frontend not found:\n\n${frontendPath}`,
@@ -512,7 +833,7 @@ function createWindow() {
 
   /* =======================================================
      RENDERER EVENTS
-     ======================================================= */
+  ======================================================= */
 
   mainWindow.webContents.on(
     'did-finish-load',
@@ -538,17 +859,8 @@ function createWindow() {
         }
       }
 
-      /*
-       * Fix the sidebar/mobile logo
-       * after React has rendered.
-       */
       await applyRendererBranding()
 
-      /*
-       * React can render additional parts
-       * after did-finish-load, so apply once
-       * more shortly afterward.
-       */
       setTimeout(() => {
         applyRendererBranding()
       }, 250)
@@ -590,7 +902,7 @@ function createWindow() {
 
 /* =========================================================
    FOLDER PICKER
-   ========================================================= */
+========================================================= */
 
 ipcMain.handle(
   'dialog:choose-folder',
@@ -646,7 +958,7 @@ ipcMain.handle(
 
 /* =========================================================
    SINGLE INSTANCE
-   ========================================================= */
+========================================================= */
 
 app.on(
   'second-instance',
@@ -669,10 +981,12 @@ app.on(
 
 /* =========================================================
    APP START
-   ========================================================= */
+========================================================= */
 
 app.whenReady().then(() => {
-  if (process.platform === 'win32') {
+  if (
+    process.platform === 'win32'
+  ) {
     app.setAppUserModelId(
       APP_ID,
     )
@@ -683,7 +997,10 @@ app.whenReady().then(() => {
     (event, contents) => {
       contents.on(
         'will-navigate',
-        (navigationEvent, url) => {
+        (
+          navigationEvent,
+          url,
+        ) => {
           if (
             isMainWindowContents(
               contents,
@@ -702,6 +1019,13 @@ app.whenReady().then(() => {
   startBackend()
   createWindow()
 
+  /*
+   * Initialize only after the Electron
+   * application is ready and the window
+   * exists.
+   */
+  initializeAutoUpdater()
+
   app.on(
     'activate',
     () => {
@@ -717,7 +1041,7 @@ app.whenReady().then(() => {
 
 /* =========================================================
    SHUTDOWN
-   ========================================================= */
+========================================================= */
 
 app.on(
   'before-quit',
