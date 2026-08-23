@@ -346,23 +346,21 @@ function initializeAutoUpdater() {
 
   updaterInitialized = true
 
-  /*
-   * We want the VIDORA React page to control
-   * when an update check happens.
-   */
   autoUpdater.autoDownload = true
-
-  /*
-   * Do not unexpectedly install while the user
-   * is working. React will explicitly request
-   * installation after update-downloaded.
-   */
   autoUpdater.autoInstallOnAppQuit = false
 
   /*
-   * electron-updater's GitHub provider will use
-   * the publish configuration from package.json.
+   * Use differential downloads when possible so VIDORA
+   * behaves like a patch-style updater.
    */
+  autoUpdater.disableDifferentialDownload = false
+
+  /*
+   * VIDORA uses a normal NSIS installer internally, but the
+   * user should never have to interact with its UI during an update.
+   */
+  autoUpdater.disableWebInstaller = true
+
   autoUpdater.on(
     'checking-for-update',
     () => {
@@ -591,12 +589,8 @@ ipcMain.handle(
     }
 
     try {
-      /*
-       * This restarts VIDORA and launches the
-       * downloaded NSIS update installer.
-       */
       autoUpdater.quitAndInstall(
-        false,
+        true,
         true,
       )
 
@@ -619,10 +613,6 @@ ipcMain.handle(
   },
 )
 
-/*
- * Allow React to retrieve the current version
- * without exposing Node.js directly.
- */
 ipcMain.handle(
   'app:get-version',
   () => app.getVersion(),
@@ -1019,11 +1009,6 @@ app.whenReady().then(() => {
   startBackend()
   createWindow()
 
-  /*
-   * Initialize only after the Electron
-   * application is ready and the window
-   * exists.
-   */
   initializeAutoUpdater()
 
   app.on(
