@@ -35,7 +35,8 @@ const API_BASE_URL = 'http://127.0.0.1:8000'
 const HISTORY_KEY = 'vidora-history'
 const DOWNLOAD_PATH_KEY = 'vidora-download-path'
 const THEME_KEY = 'vidora-theme'
-const APP_VERSION = '1.0.0'
+const FALLBACK_APP_VERSION = '1.0.1'
+const APP_VERSION = FALLBACK_APP_VERSION
 
 const navItems = [
   { id: 'home', label: 'Home', icon: Home },
@@ -248,40 +249,303 @@ function DownloadsPage({ dark, downloads }) { return <section className="space-y
 
 function HistoryPage({ dark, history, setHistory }) { return <section className="space-y-8 animate-fadeSlideIn"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>HISTORY</div><h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Download history.</h1><p className="mt-4 text-sm text-slate-500">Saved locally on this computer.</p></div>{history.length>0&&<Button dark={dark} icon={Trash2} variant="secondary" onClick={()=>setHistory([])}>Clear</Button>}</div><div className="space-y-3">{history.length===0?<Glass dark={dark} hover={false} className="p-12 text-center"><History size={22} className={dark?'text-slate-700':'text-slate-400'}/><div className={`mt-4 text-lg font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>History is empty</div></Glass>:history.map(item=><Glass dark={dark} key={item.id} className="px-5 py-4"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${dark?'border-emerald-400/15 bg-emerald-400/[.05] text-emerald-300':'border-emerald-200 bg-emerald-50 text-emerald-600'}`}><Check size={16}/></div><div className="min-w-0 flex-1"><div className={`truncate text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>{item.title}</div><div className="mt-1 truncate text-xs text-slate-400">{item.filename} • {item.format}</div><div className="mt-1 text-[10px] text-slate-400">{new Date(item.createdAt).toLocaleString()}</div></div><button type="button" onClick={()=>setHistory(cur=>cur.filter(entry=>entry.id!==item.id))} className={`grid h-10 w-10 place-items-center rounded-full transition ${dark?'text-slate-700 hover:bg-rose-400/[.05] hover:text-rose-300':'text-slate-400 hover:bg-rose-50 hover:text-rose-500'}`}><Trash2 size={15}/></button></div></Glass>)}</div></section> }
 
-function UpdatesPage({ dark }) {
-  const [status,setStatus] = useState('idle')
-  const [progress,setProgress] = useState(0)
-  const checking = status==='checking', updating=status==='updating', complete=status==='complete'
-  const checkForUpdates = async () => {
-    if (checking || updating) return
-    setStatus('checking'); setProgress(0)
-    let current=0
-    const timer=window.setInterval(()=>{ current+=10; setProgress(Math.min(current,100)) },120)
-    try {
-      const checker=window.desktop?.checkForUpdates
-      if (typeof checker==='function') {
-        const result=await checker()
-        window.clearInterval(timer)
-        if (result?.updateAvailable) {
-          setStatus('updating'); setProgress(0)
-          try {
-            const installer=window.desktop?.installUpdate
-            if (typeof installer==='function') await installer()
-          } catch {}
-          setProgress(100); setStatus('complete'); return
-        }
-        setProgress(100); window.setTimeout(()=>setStatus('complete'),300); return
-      }
-      window.clearInterval(timer); setProgress(100); window.setTimeout(()=>setStatus('complete'),300)
-    } catch { window.clearInterval(timer); setStatus('idle'); setProgress(0) }
-  }
-  return <section className="mx-auto max-w-[760px] space-y-8 animate-fadeSlideIn"><div className="text-center"><div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>UPDATES</div><h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Keep VIDORA current.</h1></div><Glass dark={dark} hover={false} className="relative overflow-hidden px-6 py-14 sm:px-10 sm:py-16"><div className={`absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full blur-[90px] ${dark?'bg-cyan-400/10':'bg-blue-400/10'}`}/><div className="relative mx-auto flex max-w-[520px] flex-col items-center text-center">{complete?<><div className={`grid h-16 w-16 place-items-center rounded-full border ${dark?'border-emerald-400/20 bg-emerald-400/[.07] text-emerald-300':'border-emerald-200 bg-emerald-50 text-emerald-600'}`}><Check size={28}/></div><div className={`mt-6 text-2xl font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>You’re up to date.</div></>:updating?<><div className={`grid h-16 w-16 place-items-center rounded-full border ${dark?'border-blue-400/20 bg-blue-400/[.07] text-blue-300':'border-blue-200 bg-blue-50 text-blue-600'}`}><Upload size={26} className="animate-pulse"/></div><div className={`mt-6 text-2xl font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>Updating VIDORA…</div><div className="mt-7 h-2 w-full overflow-hidden rounded-full bg-slate-200/70"><div className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 transition-all duration-300" style={{width:`${progress}%`}}/></div></>:checking?<><div className={`grid h-16 w-16 place-items-center rounded-full border ${dark?'border-cyan-400/20 bg-cyan-400/[.06] text-cyan-300':'border-blue-200 bg-blue-50 text-blue-600'}`}><RefreshCw size={26} className="animate-spin"/></div><div className={`mt-6 text-2xl font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>Checking for updates…</div><div className="mt-7 h-2 w-full overflow-hidden rounded-full bg-slate-200/70"><div className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 transition-all duration-200" style={{width:`${progress}%`}}/></div></>:<><div className={`grid h-16 w-16 place-items-center rounded-full border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/70 text-blue-600'}`}><ShieldCheck size={27}/></div><div className={`mt-6 text-2xl font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>Check for updates</div><Button dark={dark} onClick={checkForUpdates} icon={Search} className="mt-7">Check for updates</Button></>}</div></Glass></section>
-}
+function UpdatesPage({ dark, appVersion = FALLBACK_APP_VERSION }) {
+  const [status, setStatus] = useState('idle')
+  const [progress, setProgress] = useState(0)
+  const [errorMessage, setErrorMessage] = useState('')
 
-function SettingsPage({ dark, setDark, downloadPath, historyCount, chooseDownloadFolder, onUpdates }) { return <section className="space-y-8 animate-fadeSlideIn"><div><div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>SETTINGS</div><h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Preferences.</h1><p className="mt-4 text-sm text-slate-500">Tune your VIDORA workspace.</p></div><Glass dark={dark} hover={false} className="overflow-hidden divide-y"><button type="button" onClick={()=>setDark(v=>!v)} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}>{dark?<Moon size={17}/>:<Sun size={17}/>}</div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Appearance</div><div className="mt-1 text-xs text-slate-500">Nebula dark theme or Orion light theme.</div></div></div><div className={`relative h-8 w-14 rounded-full border p-1 ${dark?'border-cyan-400/25 bg-cyan-400/10':'border-slate-200 bg-slate-100'}`}><div className={`h-6 w-6 rounded-full shadow-sm transition-transform duration-500 ${dark?'translate-x-6 bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,.35)]':'bg-white'}`}/></div></button><button type="button" onClick={chooseDownloadFolder} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex min-w-0 items-center gap-4"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><FolderOpen size={17}/></div><div className="min-w-0"><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download location</div><div className="mt-1 max-w-[700px] truncate text-xs text-slate-500">{downloadPath}</div></div></div><ChevronRight size={16} className="text-slate-400"/></button><button type="button" onClick={onUpdates} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Upload size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Updates</div><div className="mt-1 text-xs text-slate-500">Check for a newer version.</div></div></div><ChevronRight size={16} className="text-slate-400"/></button><div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><History size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download history</div><div className="mt-1 text-xs text-slate-500">{historyCount} saved entries</div></div></div><Status dark={dark} tone="blue">Local</Status></div><div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Monitor size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Application</div><div className="mt-1 text-xs text-slate-500">VIDORA Desktop</div></div></div><span className="text-xs font-semibold text-slate-400">{APP_VERSION}</span></div></Glass></section> }
+  const checking = status === 'checking'
+  const downloading = status === 'downloading'
+  const installing = status === 'installing'
+  const complete = status === 'complete'
+  const busy = checking || downloading || installing
+
+  useEffect(() => {
+    const installedVersion = localStorage.getItem('vidora-update-installed-version')
+
+    if (installedVersion === appVersion) {
+      localStorage.removeItem('vidora-update-installed-version')
+      setProgress(100)
+      setStatus('complete')
+    }
+  }, [])
+
+  useEffect(() => {
+    const subscribe = window.desktop?.onUpdaterEvent
+
+    if (typeof subscribe !== 'function') {
+      return undefined
+    }
+
+    const unsubscribe = subscribe((payload = {}) => {
+      switch (payload.event) {
+        case 'checking-for-update':
+          setErrorMessage('')
+          setProgress(0)
+          setStatus('checking')
+          break
+
+        case 'update-available':
+          setErrorMessage('')
+          setProgress(0)
+          setStatus('downloading')
+          break
+
+        case 'download-progress':
+          setErrorMessage('')
+          setProgress(
+            Math.max(
+              0,
+              Math.min(
+                100,
+                Number(payload.percent) || 0,
+              ),
+            ),
+          )
+          setStatus('downloading')
+          break
+
+        case 'update-downloaded':
+          setErrorMessage('')
+          setProgress(100)
+          setStatus('installing')
+
+          localStorage.setItem(
+            'vidora-update-installed-version',
+            payload.version || '',
+          )
+
+          window.desktop?.installUpdate?.().catch?.(() => {})
+          break
+
+        case 'update-not-available':
+          setErrorMessage('')
+          setProgress(100)
+          setStatus('complete')
+          break
+
+        case 'update-cancelled':
+          setProgress(0)
+          setStatus('idle')
+          break
+
+        case 'error':
+          setProgress(0)
+          setStatus('idle')
+          setErrorMessage(
+            payload.message || 'Could not check for updates.',
+          )
+          break
+
+        default:
+          break
+      }
+    })
+
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
+  }, [])
+
+  const checkForUpdates = async () => {
+    if (busy) {
+      return
+    }
+
+    setErrorMessage('')
+    setProgress(0)
+    setStatus('checking')
+
+    try {
+      const result = await window.desktop?.checkForUpdates?.()
+
+      if (!result) {
+        throw new Error('Update service is unavailable.')
+      }
+
+      if (result.status === 'current' || result.status === 'unavailable') {
+        setProgress(100)
+        setStatus('complete')
+        return
+      }
+
+      if (result.status === 'error') {
+        throw new Error(
+          result.message || 'Could not check for updates.',
+        )
+      }
+
+      if (result.status === 'available') {
+        setStatus('downloading')
+        return
+      }
+
+      if (result.status === 'disabled-in-development') {
+        setProgress(100)
+        setStatus('complete')
+      }
+    } catch (error) {
+      setProgress(0)
+      setStatus('idle')
+      setErrorMessage(
+        error?.message || 'Could not check for updates.',
+      )
+    }
+  }
+
+  return (
+    <section className="mx-auto max-w-[760px] space-y-8 animate-fadeSlideIn">
+      <div className="text-center">
+        <div
+          className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark ? 'text-cyan-400' : 'text-blue-600'}`}
+        >
+          UPDATES
+        </div>
+
+        <h1
+          className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark ? 'text-white' : 'text-slate-900'}`}
+        >
+          Keep VIDORA current.
+        </h1>
+      </div>
+
+      <Glass
+        dark={dark}
+        hover={false}
+        className="relative overflow-hidden px-6 py-14 sm:px-10 sm:py-16"
+      >
+        <div
+          className={`absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full blur-[90px] ${dark ? 'bg-cyan-400/10' : 'bg-blue-400/10'}`}
+        />
+
+        <div className="relative mx-auto flex max-w-[520px] flex-col items-center text-center">
+          {complete ? (
+            <>
+              <div
+                className={`grid h-16 w-16 place-items-center rounded-full border ${dark ? 'border-emerald-400/20 bg-emerald-400/[.07] text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-600'}`}
+              >
+                <Check size={28} strokeWidth={2} />
+              </div>
+
+              <div
+                className={`mt-6 text-2xl font-medium tracking-tight ${dark ? 'text-zinc-100' : 'text-slate-800'}`}
+              >
+                You’re up to date.
+              </div>
+            </>
+          ) : installing ? (
+            <>
+              <div
+                className={`grid h-16 w-16 place-items-center rounded-full border ${dark ? 'border-blue-400/20 bg-blue-400/[.07] text-blue-300' : 'border-blue-200 bg-blue-50 text-blue-600'}`}
+              >
+                <Upload size={26} className="animate-pulse" />
+              </div>
+
+              <div
+                className={`mt-6 text-2xl font-medium tracking-tight ${dark ? 'text-zinc-100' : 'text-slate-800'}`}
+              >
+                Updating VIDORA…
+              </div>
+
+              <div
+                className={`mt-7 h-2 w-full overflow-hidden rounded-full ${dark ? 'bg-white/[.06]' : 'bg-slate-200/70'}`}
+              >
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500"
+                  style={{ width: '100%' }}
+                />
+              </div>
+            </>
+          ) : downloading ? (
+            <>
+              <div
+                className={`grid h-16 w-16 place-items-center rounded-full border ${dark ? 'border-blue-400/20 bg-blue-400/[.07] text-blue-300' : 'border-blue-200 bg-blue-50 text-blue-600'}`}
+              >
+                <Download size={26} className="animate-pulse" />
+              </div>
+
+              <div
+                className={`mt-6 text-2xl font-medium tracking-tight ${dark ? 'text-zinc-100' : 'text-slate-800'}`}
+              >
+                Downloading update…
+              </div>
+
+              <div
+                className={`mt-7 h-2 w-full overflow-hidden rounded-full ${dark ? 'bg-white/[.06]' : 'bg-slate-200/70'}`}
+              >
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 transition-[width] duration-200"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </>
+          ) : checking ? (
+            <>
+              <div
+                className={`grid h-16 w-16 place-items-center rounded-full border ${dark ? 'border-cyan-400/20 bg-cyan-400/[.06] text-cyan-300' : 'border-blue-200 bg-blue-50 text-blue-600'}`}
+              >
+                <RefreshCw size={26} className="animate-spin" />
+              </div>
+
+              <div
+                className={`mt-6 text-2xl font-medium tracking-tight ${dark ? 'text-zinc-100' : 'text-slate-800'}`}
+              >
+                Checking for updates…
+              </div>
+
+              <div
+                className={`mt-7 h-2 w-full overflow-hidden rounded-full ${dark ? 'bg-white/[.06]' : 'bg-slate-200/70'}`}
+              >
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-blue-500 transition-[width] duration-200"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div
+                className={`grid h-16 w-16 place-items-center rounded-full border ${dark ? 'border-white/10 bg-white/[.04] text-cyan-300' : 'border-white/80 bg-white/70 text-blue-600'}`}
+              >
+                <ShieldCheck size={27} />
+              </div>
+
+              <div
+                className={`mt-6 text-2xl font-medium tracking-tight ${dark ? 'text-zinc-100' : 'text-slate-800'}`}
+              >
+                Check for updates
+              </div>
+
+              <Button
+                dark={dark}
+                onClick={checkForUpdates}
+                icon={Search}
+                className="mt-7"
+              >
+                Check for updates
+              </Button>
+
+              {errorMessage && (
+                <div
+                  className={`mt-5 rounded-2xl border px-4 py-3 text-xs ${dark ? 'border-rose-400/15 bg-rose-400/[.05] text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-600'}`}
+                >
+                  {errorMessage}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Glass>
+    </section>
+  )
+}
+function SettingsPage({ dark, setDark, downloadPath, historyCount, chooseDownloadFolder, onUpdates, appVersion = FALLBACK_APP_VERSION }) { return <section className="space-y-8 animate-fadeSlideIn"><div><div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>SETTINGS</div><h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Preferences.</h1><p className="mt-4 text-sm text-slate-500">Tune your VIDORA workspace.</p></div><Glass dark={dark} hover={false} className="overflow-hidden divide-y"><button type="button" onClick={()=>setDark(v=>!v)} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}>{dark?<Moon size={17}/>:<Sun size={17}/>}</div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Appearance</div><div className="mt-1 text-xs text-slate-500">Nebula dark theme or Orion light theme.</div></div></div><div className={`relative h-8 w-14 rounded-full border p-1 ${dark?'border-cyan-400/25 bg-cyan-400/10':'border-slate-200 bg-slate-100'}`}><div className={`h-6 w-6 rounded-full shadow-sm transition-transform duration-500 ${dark?'translate-x-6 bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,.35)]':'bg-white'}`}/></div></button><button type="button" onClick={chooseDownloadFolder} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex min-w-0 items-center gap-4"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><FolderOpen size={17}/></div><div className="min-w-0"><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download location</div><div className="mt-1 max-w-[700px] truncate text-xs text-slate-500">{downloadPath}</div></div></div><ChevronRight size={16} className="text-slate-400"/></button><button type="button" onClick={onUpdates} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Upload size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Updates</div><div className="mt-1 text-xs text-slate-500">Check for a newer version.</div></div></div><ChevronRight size={16} className="text-slate-400"/></button><div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><History size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download history</div><div className="mt-1 text-xs text-slate-500">{historyCount} saved entries</div></div></div><Status dark={dark} tone="blue">Local</Status></div><div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Monitor size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Application</div><div className="mt-1 text-xs text-slate-500">VIDORA Desktop</div></div></div><span className="text-xs font-semibold text-slate-400">{appVersion}</span></div></Glass></section> }
 
 export default function App() {
   const [active,setActive]=useState('home')
+  const [appVersion,setAppVersion]=useState(FALLBACK_APP_VERSION)
   const [darkState,setDarkState]=useState(()=>localStorage.getItem(THEME_KEY)!=='light')
   const [downloadPath,setDownloadPath]=useState(()=>localStorage.getItem(DOWNLOAD_PATH_KEY)||'Default Downloads folder')
   const [url,setUrl]=useState('')
@@ -302,6 +566,8 @@ export default function App() {
   const videoFormats=useMemo(()=>getVideoFormats(videoInfo?.formats),[videoInfo])
   const audioFormats=useMemo(()=>getAudioFormats(videoInfo?.formats),[videoInfo])
   const bulkUrls=useMemo(()=>bulkText.split(/\r?\n|,/).map(v=>v.trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i),[bulkText])
+
+  useEffect(()=>{let cancelled=false;const loadVersion=async()=>{try{const version=await window.desktop?.getVersion?.();if(!cancelled&&version)setAppVersion(version)}catch(error){console.warn('VIDORA version lookup failed:',error)}};loadVersion();return()=>{cancelled=true}},[])
 
   useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.style.colorScheme=dark?'dark':'light';document.body.style.background=dark?'#000':'#f7f9fa';document.body.style.color=dark?'#fff':'#1a1a24'},[dark])
   useEffect(()=>localStorage.setItem(HISTORY_KEY,JSON.stringify(history)),[history])
@@ -330,7 +596,7 @@ export default function App() {
 
   const title=active==='downloader'?'Downloader':active==='bulk'?'Bulk':active==='downloads'?'Downloads':active==='history'?'History':active==='updates'?'Updates':active==='settings'?'Settings':'Home'
   return <div className={dark?'app-root app-dark':'app-root app-light'}>{dark?<div className="nebula-grid"/>:<div className="orion-background-orbs"><span/><span/><span/></div>}<div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1700px]"><aside className="sticky top-0 hidden h-screen w-[270px] shrink-0 p-4 lg:block"><div className={dark?'sidebar-dark nebula-gradient-border':'sidebar-light-orion'}><div className="flex items-center gap-3 px-3 py-3"><div className={`grid h-11 w-11 place-items-center overflow-hidden rounded-2xl border ${dark?'border-white/10 bg-white/[.05]':'border-white/80 bg-white/75 shadow-sm'}`}><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-8 w-8 object-contain"/></div><div><div className={`text-sm font-semibold tracking-[.12em] ${dark?'text-white':'text-slate-800'}`}>VIDORA</div><div className={`mt-1 text-[10px] ${dark?'text-slate-600':'text-slate-400'}`}>Your media. Your way.</div></div></div><div className={`mt-7 px-3 text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-slate-600':'text-slate-400'}`}>Workspace</div><div className="mt-3 space-y-1.5">{navItems.map(nav=>{const selected=active===nav.id;return <button key={nav.id} type="button" onClick={()=>setActive(nav.id)} className={`nav-button ${selected?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Icon icon={nav.icon} size={16}/></span>{nav.label}</button>})}</div><div className="mt-auto space-y-1.5 pt-4"><button type="button" onClick={()=>setActive('updates')} className={`nav-button ${active==='updates'?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Upload size={16}/></span>Updates</button><button type="button" onClick={()=>setActive('settings')} className={`nav-button ${active==='settings'?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Settings size={16}/></span>Settings</button></div></div></aside>
-    <div className="min-w-0 flex-1"><header className="sticky top-0 z-40 px-4 pt-4 sm:px-6 lg:px-8"><div className={`topbar ${dark?'topbar-dark':'topbar-light'}`}><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[.04] lg:hidden"><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-7 w-7 object-contain"/></div><div><div className={`text-sm font-medium ${dark?'text-white':'text-slate-800'}`}>{title}</div><div className={`hidden text-[9px] uppercase tracking-[.16em] sm:block ${dark?'text-slate-600':'text-slate-400'}`}>VIDORA desktop workspace</div></div></div><div className="flex items-center gap-2"><button type="button" onClick={()=>setDark(v=>!v)} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`} title={dark?'Light theme':'Dark theme'}>{dark?<Sun size={16}/>:<Moon size={16}/>}</button><span className={`hidden rounded-full border px-3 py-2 text-[9px] font-semibold uppercase tracking-[.14em] sm:inline-flex ${dark?'border-white/10 bg-white/[.04] text-slate-600':'border-white/75 bg-white/50 text-slate-400'}`}>v{APP_VERSION}</span><button type="button" onClick={()=>setActive('settings')} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`}><Settings size={16}/></button></div></div></header><main className="mx-auto w-full max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">{active==='home'&&<HomePage dark={dark} onStart={()=>setActive('downloader')}/>} {active==='downloader'&&<DownloaderPage dark={dark} url={url} setUrl={setUrl} videoInfo={videoInfo} videoFormats={videoFormats} audioFormats={audioFormats} isAnalyzing={isAnalyzing} error={error} setError={setError} analyze={analyze} paste={paste} download={download} cancelDownload={cancelDownload} downloadState={downloadState} qualityRef={qualityRef} downloadSectionRef={downloadSectionRef}/>} {active==='bulk'&&<BulkPage dark={dark} bulkText={bulkText} setBulkText={setBulkText} bulkQuality={bulkQuality} setBulkQuality={setBulkQuality} bulkState={bulkState} startBulkDownload={startBulkDownload} cancelBulkDownload={cancelBulkDownload} bulkRef={bulkRef}/>} {active==='downloads'&&<DownloadsPage dark={dark} downloads={downloads}/>} {active==='history'&&<HistoryPage dark={dark} history={history} setHistory={setHistory}/>} {active==='updates'&&<UpdatesPage dark={dark}/>} {active==='settings'&&<SettingsPage dark={dark} setDark={setDark} downloadPath={downloadPath} historyCount={history.length} chooseDownloadFolder={chooseDownloadFolder} onUpdates={()=>setActive('updates')}/>}</main></div></div><style>{STYLE}</style></div>
+    <div className="min-w-0 flex-1"><header className="sticky top-0 z-40 px-4 pt-4 sm:px-6 lg:px-8"><div className={`topbar ${dark?'topbar-dark':'topbar-light'}`}><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[.04] lg:hidden"><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-7 w-7 object-contain"/></div><div><div className={`text-sm font-medium ${dark?'text-white':'text-slate-800'}`}>{title}</div><div className={`hidden text-[9px] uppercase tracking-[.16em] sm:block ${dark?'text-slate-600':'text-slate-400'}`}>VIDORA desktop workspace</div></div></div><div className="flex items-center gap-2"><button type="button" onClick={()=>setDark(v=>!v)} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`} title={dark?'Light theme':'Dark theme'}>{dark?<Sun size={16}/>:<Moon size={16}/>}</button><span className={`hidden rounded-full border px-3 py-2 text-[9px] font-semibold uppercase tracking-[.14em] sm:inline-flex ${dark?'border-white/10 bg-white/[.04] text-slate-600':'border-white/75 bg-white/50 text-slate-400'}`}>v{appVersion}</span><button type="button" onClick={()=>setActive('settings')} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`}><Settings size={16}/></button></div></div></header><main className="mx-auto w-full max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">{active==='home'&&<HomePage dark={dark} onStart={()=>setActive('downloader')}/>} {active==='downloader'&&<DownloaderPage dark={dark} url={url} setUrl={setUrl} videoInfo={videoInfo} videoFormats={videoFormats} audioFormats={audioFormats} isAnalyzing={isAnalyzing} error={error} setError={setError} analyze={analyze} paste={paste} download={download} cancelDownload={cancelDownload} downloadState={downloadState} qualityRef={qualityRef} downloadSectionRef={downloadSectionRef}/>} {active==='bulk'&&<BulkPage dark={dark} bulkText={bulkText} setBulkText={setBulkText} bulkQuality={bulkQuality} setBulkQuality={setBulkQuality} bulkState={bulkState} startBulkDownload={startBulkDownload} cancelBulkDownload={cancelBulkDownload} bulkRef={bulkRef}/>} {active==='downloads'&&<DownloadsPage dark={dark} downloads={downloads}/>} {active==='history'&&<HistoryPage dark={dark} history={history} setHistory={setHistory}/>} {active==='updates'&&<UpdatesPage dark={dark} appVersion={appVersion}/>} {active==='settings'&&<SettingsPage dark={dark} setDark={setDark} downloadPath={downloadPath} historyCount={history.length} chooseDownloadFolder={chooseDownloadFolder} onUpdates={()=>setActive('updates')} appVersion={appVersion}/>}</main></div></div><style>{STYLE}</style></div>
 }
 
 const STYLE = `
