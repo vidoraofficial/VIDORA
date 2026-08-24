@@ -15,3 +15,4 @@ backend/VideoDownloaderBackend.old-active.exe
 backend/VideoDownloaderBackend.old.exe
 backend/VideoDownloaderBackend.pre-bulk.exe
 backend/VideoDownloaderBackend.previous.exe
+.env 

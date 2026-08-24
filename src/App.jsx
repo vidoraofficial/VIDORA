@@ -29,14 +29,30 @@ import {
   Sun,
   Trash2,
   Upload,
+  UserCircle,
+  LogIn,
+  LogOut,
 } from 'lucide-react'
+
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut as firebaseSignOut } from 'firebase/auth'
+import { auth } from './lib/firebase'
 
 const API_BASE_URL = 'http://127.0.0.1:8000'
 const HISTORY_KEY = 'vidora-history'
 const DOWNLOAD_PATH_KEY = 'vidora-download-path'
 const THEME_KEY = 'vidora-theme'
-const FALLBACK_APP_VERSION = '1.0.1'
+const ONBOARDING_KEY = 'vidora-onboarding-complete'
+const TRIAL_STARTED_AT_KEY = 'vidora-trial-started-at'
+const TRIAL_UID_KEY = 'vidora-trial-uid'
+const TRIAL_DURATION_MS = 30 * 60 * 1000
+const FALLBACK_APP_VERSION = '1.0.0-beta.1'
 const APP_VERSION = FALLBACK_APP_VERSION
+
+function formatAppVersion(version = APP_VERSION) {
+  const value = String(version || APP_VERSION)
+  if (/^1\.0\.0-beta(?:\.\d+)?$/i.test(value)) return '1.0 BETA'
+  return value.replace(/-beta(?:\.\d+)?$/i, ' BETA')
+}
 
 const navItems = [
   { id: 'home', label: 'Home', icon: Home },
@@ -116,48 +132,48 @@ const Icon = memo(function Icon({ icon: Component, size = 18, className = '', st
   return <Component size={size} strokeWidth={strokeWidth} className={className} aria-hidden="true" />
 })
 
-function NebulaPrimaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '' }) {
+function NebulaPrimaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '', type = 'button' }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`nebula-button ${className}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`nebula-button ${className}`}>
       <span className="nebula-points" aria-hidden="true">{Array.from({ length: 10 }, (_, i) => <i key={i} className={`nebula-point point-${i + 1}`} />)}</span>
       <span className="nebula-inner"><span>{children}</span><Component size={17} strokeWidth={1.6} className="nebula-arrow" /></span>
     </button>
   )
 }
 
-function NebulaSecondaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '' }) {
+function NebulaSecondaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '', type = 'button' }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`nebula-secondary-button ${className}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`nebula-secondary-button ${className}`}>
       <span className="nebula-secondary-inner"><span>{children}</span><Component size={17} strokeWidth={1.6} className="nebula-secondary-arrow" /></span>
       <span className="nebula-secondary-line" aria-hidden="true" />
     </button>
   )
 }
 
-function OrionPrimaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '' }) {
+function OrionPrimaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '', type = 'button' }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`orion-primary-button ${className}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`orion-primary-button ${className}`}>
       <span className="orion-primary-shine" />
       <span className="orion-primary-inner"><span>{children}</span><Component size={16} strokeWidth={1.8} className="orion-primary-icon" /></span>
     </button>
   )
 }
 
-function OrionSecondaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '' }) {
+function OrionSecondaryButton({ children, onClick, icon: Component = ArrowRight, disabled = false, className = '', type = 'button' }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`orion-secondary-button ${className}`}>
+    <button type={type} onClick={onClick} disabled={disabled} className={`orion-secondary-button ${className}`}>
       <span>{children}</span><Component size={16} strokeWidth={1.8} className="orion-secondary-icon" />
     </button>
   )
 }
 
-function Button({ dark, children, onClick, icon, disabled = false, className = '', variant = 'primary' }) {
+function Button({ dark, children, onClick, icon, disabled = false, className = '', variant = 'primary', type = 'button' }) {
   if (dark) return variant === 'secondary'
-    ? <NebulaSecondaryButton onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</NebulaSecondaryButton>
-    : <NebulaPrimaryButton onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</NebulaPrimaryButton>
+    ? <NebulaSecondaryButton type={type} onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</NebulaSecondaryButton>
+    : <NebulaPrimaryButton type={type} onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</NebulaPrimaryButton>
   return variant === 'secondary'
-    ? <OrionSecondaryButton onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</OrionSecondaryButton>
-    : <OrionPrimaryButton onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</OrionPrimaryButton>
+    ? <OrionSecondaryButton type={type} onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</OrionSecondaryButton>
+    : <OrionPrimaryButton type={type} onClick={onClick} icon={icon} disabled={disabled} className={className}>{children}</OrionPrimaryButton>
 }
 
 const Glass = memo(function Glass({ dark, children, className = '', hover = true }) {
@@ -248,6 +264,54 @@ function BulkPage({ dark, bulkText, setBulkText, bulkQuality, setBulkQuality, bu
 function DownloadsPage({ dark, downloads }) { return <section className="space-y-8 animate-fadeSlideIn"><div><div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>DOWNLOADS</div><h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Current downloads.</h1></div><div className="space-y-3">{downloads.length===0?<Glass dark={dark} hover={false} className="p-12 text-center"><Download size={22} className={dark?'text-slate-700':'text-slate-400'}/><div className={`mt-4 text-lg font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>No downloads yet</div><p className="mt-2 text-sm text-slate-500">Start from Downloader.</p></Glass>:downloads.map(item=><Glass dark={dark} key={item.id} className="px-5 py-4"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/60 text-slate-500'}`}><Icon icon={item.status==='completed'?Check:item.status==='failed'?RefreshCw:item.status==='cancelled'?Square:Download} size={17}/></div><div className="min-w-0 flex-1"><div className={`truncate text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>{item.title}</div><div className="mt-1 truncate text-xs text-slate-400">{item.format}{item.filename?` • ${item.filename}`:''}</div></div><Status dark={dark} tone={item.status==='completed'?'green':item.status==='failed'?'red':item.status==='cancelled'?'neutral':'blue'}>{item.status}</Status></div></Glass>)}</div></section> }
 
 function HistoryPage({ dark, history, setHistory }) { return <section className="space-y-8 animate-fadeSlideIn"><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>HISTORY</div><h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Download history.</h1><p className="mt-4 text-sm text-slate-500">Saved locally on this computer.</p></div>{history.length>0&&<Button dark={dark} icon={Trash2} variant="secondary" onClick={()=>setHistory([])}>Clear</Button>}</div><div className="space-y-3">{history.length===0?<Glass dark={dark} hover={false} className="p-12 text-center"><History size={22} className={dark?'text-slate-700':'text-slate-400'}/><div className={`mt-4 text-lg font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>History is empty</div></Glass>:history.map(item=><Glass dark={dark} key={item.id} className="px-5 py-4"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${dark?'border-emerald-400/15 bg-emerald-400/[.05] text-emerald-300':'border-emerald-200 bg-emerald-50 text-emerald-600'}`}><Check size={16}/></div><div className="min-w-0 flex-1"><div className={`truncate text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>{item.title}</div><div className="mt-1 truncate text-xs text-slate-400">{item.filename} • {item.format}</div><div className="mt-1 text-[10px] text-slate-400">{new Date(item.createdAt).toLocaleString()}</div></div><button type="button" onClick={()=>setHistory(cur=>cur.filter(entry=>entry.id!==item.id))} className={`grid h-10 w-10 place-items-center rounded-full transition ${dark?'text-slate-700 hover:bg-rose-400/[.05] hover:text-rose-300':'text-slate-400 hover:bg-rose-50 hover:text-rose-500'}`}><Trash2 size={15}/></button></div></Glass>)}</div></section> }
+
+function GettingStartedPage({ dark, setDark, downloadPath, chooseDownloadFolder, onComplete, user, authLoading, authError, authMessage, onGoogleSignIn }) {
+  const [step, setStep] = useState(0)
+  const steps = [
+    { eyebrow:'WELCOME', title:'Your media. Your way.', text:'VIDORA gives you one focused Windows workspace for video downloads, audio extraction, and batch processing.', icon:Sparkles },
+    { eyebrow:'PERSONALIZE', title:'Make VIDORA yours.', text:'Choose Nebula or Orion and set the folder where your completed downloads should go.', icon:Settings },
+    { eyebrow:'READY', title:'Start your trial.', text:'Google sign-in is required before VIDORA features can be used. Your 30-minute trial begins after successful login.', icon:ShieldCheck },
+  ]
+  const current=steps[step], IconComponent=current.icon
+  const finish=()=>{if(!user)return;localStorage.setItem(ONBOARDING_KEY,'true');onComplete()}
+  const next=()=>step<2?setStep(v=>v+1):finish()
+  return <div className={dark?'app-root app-dark onboarding-page onboarding-page-dark':'app-root app-light onboarding-page onboarding-page-light'}>
+    {dark?<><div className="onboarding-nebula-grid"/><div className="onboarding-nebula-stars"/><div className="onboarding-nebula-glow-a"/><div className="onboarding-nebula-glow-b"/></>:<div className="onboarding-orion-orbs"><span/><span/><span/></div>}
+    <div className="relative z-10 min-h-screen px-4 py-5 sm:px-6 lg:px-10"><div className="mx-auto max-w-[1200px]">
+      <header className={dark?'onboarding-nav onboarding-nav-dark':'onboarding-nav onboarding-nav-light'}>
+        <div className="flex items-center gap-3"><div className={`grid h-10 w-10 place-items-center overflow-hidden rounded-xl border ${dark?'border-white/10 bg-white/[.04]':'border-white/80 bg-white/70 shadow-sm'}`}><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-7 w-7 object-contain"/></div><div><div className={`text-sm font-semibold tracking-[.14em] ${dark?'text-white':'text-slate-800'}`}>VIDORA</div><div className="text-[9px] text-slate-400">Your media. Your way.</div></div></div>
+        <div className="flex items-center gap-2"><button type="button" onClick={()=>setDark(v=>!v)} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`} title={dark?'Light theme':'Dark theme'}>{dark?<Sun size={16}/>:<Moon size={16}/>}</button><Status dark={dark} tone={user?'green':'amber'}>{user?'Google connected':'Login required'}</Status></div>
+      </header>
+      <section className="grid items-center gap-10 pt-10 sm:pt-16 lg:grid-cols-[.98fr_1.02fr] lg:pt-20">
+        <div className="animate-fadeSlideIn"><div className={dark?'onboarding-pill onboarding-pill-dark':'onboarding-pill onboarding-pill-light'}><IconComponent size={13} className={dark?'text-cyan-300':'text-blue-600'}/>{current.eyebrow}</div>
+          <h1 className={`mt-6 max-w-3xl text-5xl font-medium leading-[.95] tracking-[-.065em] sm:text-6xl lg:text-7xl ${dark?'text-white':'text-slate-900'}`}>{current.title}</h1>
+          <p className={`mt-6 max-w-xl text-sm leading-7 sm:text-base ${dark?'text-slate-400':'text-slate-500'}`}>{current.text}</p>
+          {!user && <div className={`mt-8 max-w-xl rounded-[24px] border p-5 ${dark?'border-cyan-400/15 bg-cyan-400/[.04]':'border-blue-200/80 bg-blue-50/60'}`}>
+            <div className={`text-[9px] font-semibold uppercase tracking-[.18em] ${dark?'text-cyan-300':'text-blue-600'}`}>ACCOUNT REQUIRED</div>
+            <div className={`mt-2 text-lg font-medium ${dark?'text-white':'text-slate-800'}`}>Sign in to unlock VIDORA.</div>
+            <p className="mt-2 text-xs leading-6 text-slate-500">All downloader, bulk, history, settings and other features stay locked until Google authentication succeeds.</p>
+            {authError&&<div className={`mt-4 rounded-2xl border px-4 py-3 text-xs ${dark?'border-rose-400/15 bg-rose-400/[.05] text-rose-300':'border-rose-200 bg-rose-50 text-rose-600'}`}>{authError}</div>}
+            {authMessage&&<div className={`mt-4 rounded-2xl border px-4 py-3 text-xs ${authMessage.toLowerCase().includes('cancelled') ? (dark?'border-amber-400/15 bg-amber-400/[.05] text-amber-300':'border-amber-200 bg-amber-50 text-amber-700') : (dark?'border-emerald-400/15 bg-emerald-400/[.05] text-emerald-300':'border-emerald-200 bg-emerald-50 text-emerald-600')}`}>{authMessage}</div>}
+            <div className="mt-5"><Button dark={dark} onClick={onGoogleSignIn} icon={LogIn} disabled={authLoading}>{authLoading?'Connecting…':'Continue with Google'}</Button></div>
+          </div>}
+          {user && <div className={`mt-8 rounded-[22px] border p-5 ${dark?'border-emerald-400/15 bg-emerald-400/[.04]':'border-emerald-200 bg-emerald-50/70'}`}><div className={`text-sm font-semibold ${dark?'text-emerald-200':'text-emerald-700'}`}>Google account connected</div><div className="mt-1 text-xs text-slate-500">Your 30-minute trial begins after this successful authentication and remains tied to this installation.</div></div>}
+          <div className="mt-9 flex flex-wrap items-center gap-3">
+            {step>0&&<Button dark={dark} variant="secondary" icon={ArrowRight} className="onboarding-back" onClick={()=>setStep(v=>v-1)}>Back</Button>}
+            <Button dark={dark} onClick={next} icon={step===2?Check:ArrowRight} disabled={!user}>{step===2?'Get Started':'Continue'}</Button>
+            {step===1&&<Button dark={dark} variant="secondary" icon={FolderOpen} onClick={chooseDownloadFolder} disabled={!user}>Choose folder</Button>}
+          </div>
+          <div className="mt-7 flex items-center gap-2">{steps.map((item,i)=><button key={item.eyebrow} type="button" onClick={()=>setStep(i)} className={`onboarding-dot ${i===step?(dark?'onboarding-dot-dark-active':'onboarding-dot-light-active'):(dark?'onboarding-dot-dark':'onboarding-dot-light')}`}/>) }<span className="ml-2 text-[10px] text-slate-400">Step {step+1} of 3</span></div>
+        </div>
+        <div className="animate-fadeSlideIn-delay-400">{dark?<div className="onboarding-panel onboarding-panel-dark"><div className="onboarding-panel-glow-cyan"/><div className="onboarding-panel-glow-indigo"/><div className="relative min-h-[520px] p-8 sm:p-10"><div className="flex items-center justify-between"><Status dark tone="blue">VIDORA DESKTOP</Status><span className="text-[9px] font-semibold uppercase tracking-[.18em] text-slate-600">NEBULA</span></div><div className="grid min-h-[350px] place-items-center"><div className="onboarding-nebula-core"><div className="onboarding-nebula-ring-a"/><div className="onboarding-nebula-ring-b"/><div className="onboarding-nebula-core-inner"><IconComponent size={50} strokeWidth={1.35}/></div></div></div><div><div className="text-[9px] font-semibold uppercase tracking-[.18em] text-cyan-300/80">FOCUSED WINDOWS WORKSPACE</div><div className="mt-2 text-2xl font-light tracking-[-.04em] text-white sm:text-3xl">Simple flow. Polished experience.</div><p className="mt-2 text-xs leading-5 text-slate-500">Analyze a link, choose your format, and download — without the clutter.</p></div></div></div>:<div className="onboarding-panel onboarding-panel-light"><div className="onboarding-orion-soft-glow"/><div className="relative min-h-[520px] p-8 sm:p-10"><div className="flex items-center justify-between"><Status dark={dark} tone="blue">VIDORA DESKTOP</Status><span className="text-[9px] font-semibold uppercase tracking-[.18em] text-slate-400">ORION</span></div><div className="grid min-h-[350px] place-items-center"><div className="onboarding-orion-device"><div className="onboarding-device-side device-a"/><div className="onboarding-device-side device-b"/><div className="onboarding-device-side device-c"/><div className="onboarding-device-right"/><div className="onboarding-device-body"><div className="onboarding-device-screen"><div className="onboarding-dynamic-island"><span/><i/></div><div className="onboarding-statusbar"><span>9:41</span><div><Activity size={11}/><Network size={11}/><span className="onboarding-battery"/></div></div><div className="onboarding-device-content"><div className="text-[20px] font-semibold tracking-tight text-slate-800">Intelligence</div><div className="mt-1 text-[9px] text-slate-500">All systems operational</div><div className="onboarding-mini-card mt-3"><div><span>GLOBAL UPTIME</span><strong>99.9<small>%</small></strong></div><div className="onboarding-ring"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="#f1f5f9" strokeWidth="8"/><circle cx="50" cy="50" r="42" fill="none" stroke="#3b82f6" strokeWidth="8" strokeDasharray="264" strokeDashoffset="26.4" strokeLinecap="round"/></svg><b><Check size={12}/></b></div></div><div className="onboarding-mini-card onboarding-chart-card mt-2"><div className="flex items-center justify-between"><span>RESPONSE</span><strong>182<small>ms</small></strong></div><div className="onboarding-bars">{[30,45,35,55,75,100,65,45,25,40,50,35].map((h,i)=><i key={i} style={{height:`${h}%`,animationDelay:`${i*80}ms`}}/>)}</div></div><div className="onboarding-mini-card mt-2 flex items-center gap-2"><div className="onboarding-action-dot"><Bolt size={12}/></div><div className="flex-1"><strong>Auto-Remediation</strong><span>Active • 3 actions</span></div><div className="onboarding-toggle"><i/></div></div></div><div className="onboarding-home-indicator"/></div></div></div></div><div className="text-center"><div className="text-[9px] font-semibold uppercase tracking-[.18em] text-blue-600">ORION LIGHT</div><div className="mt-2 text-2xl font-medium tracking-[-.04em] text-slate-800">Clean glass. Quiet power.</div><p className="mt-2 text-xs leading-5 text-slate-500">Soft glass surfaces, subtle movement, and the same visual language as your Orion reference.</p></div></div></div>}
+      </div>
+      </section>
+      <section className="grid gap-4 py-10 md:grid-cols-3">{[[Download,'DOWNLOADS','Video and audio in one focused flow.'],[Grid2X2,'BULK','Queue up to 20 supported links together.'],[ShieldCheck,'LOCAL FIRST','History and preferences stay on this PC.']].map(([IconItem,label,text])=><Glass key={label} dark={dark} className="p-6"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/70 text-slate-500 shadow-sm'}`}><Icon icon={IconItem} size={18}/></div><div className={`mt-5 text-[9px] font-semibold uppercase tracking-[.18em] ${dark?'text-slate-600':'text-slate-400'}`}>{label}</div><div className={`mt-2 text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>{text}</div></Glass>)}</section>
+      {step===1&&<section className={`mb-10 rounded-[24px] border p-5 ${dark?'border-white/10 bg-white/[.025]':'border-white/80 bg-white/50 shadow-soft-card'}`}><div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div><div className={`text-[9px] font-semibold uppercase tracking-[.18em] ${dark?'text-cyan-400':'text-blue-600'}`}>PREFERENCES</div><div className={`mt-2 text-lg font-medium ${dark?'text-zinc-100':'text-slate-800'}`}>Set your visual style and download location.</div><div className="mt-1 truncate text-xs text-slate-500">{downloadPath}</div></div><div className="flex flex-wrap gap-3"><Button dark={dark} variant="secondary" icon={dark?Sun:Moon} onClick={()=>setDark(v=>!v)}>{dark?'Use Orion':'Use Nebula'}</Button><Button dark={dark} variant="secondary" icon={FolderOpen} onClick={chooseDownloadFolder} disabled={!user}>Choose folder</Button></div></div></section>}
+      <div className="flex items-center justify-between pb-8"><div className="text-[10px] text-slate-400">Google sign-in is required to use VIDORA.</div><div className={`text-[10px] font-semibold uppercase tracking-[.14em] ${dark?'text-cyan-300':'text-blue-600'}`}>{user?'READY TO START':'LOCKED'}</div></div>
+    </div></div>
+    <style>{STYLE}</style>
+  </div>
+}
 
 function UpdatesPage({ dark, appVersion = FALLBACK_APP_VERSION }) {
   const [status, setStatus] = useState('idle')
@@ -409,6 +473,7 @@ function UpdatesPage({ dark, appVersion = FALLBACK_APP_VERSION }) {
         >
           Keep VIDORA current.
         </h1>
+        <div className={`mt-3 flex flex-wrap justify-center gap-2 text-[10px] font-semibold uppercase tracking-[.14em] ${dark ? 'text-slate-500' : 'text-slate-400'}`}><span>Version {formatAppVersion(appVersion)}</span><span>•</span><span>{busy ? `${Math.round(progress)}%` : complete ? '100%' : 'Ready'}</span><span>•</span><span>Windows desktop</span></div>
       </div>
 
       <Glass
@@ -541,10 +606,143 @@ function UpdatesPage({ dark, appVersion = FALLBACK_APP_VERSION }) {
     </section>
   )
 }
-function SettingsPage({ dark, setDark, downloadPath, historyCount, chooseDownloadFolder, onUpdates, appVersion = FALLBACK_APP_VERSION }) { return <section className="space-y-8 animate-fadeSlideIn"><div><div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>SETTINGS</div><h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Preferences.</h1><p className="mt-4 text-sm text-slate-500">Tune your VIDORA workspace.</p></div><Glass dark={dark} hover={false} className="overflow-hidden divide-y"><button type="button" onClick={()=>setDark(v=>!v)} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}>{dark?<Moon size={17}/>:<Sun size={17}/>}</div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Appearance</div><div className="mt-1 text-xs text-slate-500">Nebula dark theme or Orion light theme.</div></div></div><div className={`relative h-8 w-14 rounded-full border p-1 ${dark?'border-cyan-400/25 bg-cyan-400/10':'border-slate-200 bg-slate-100'}`}><div className={`h-6 w-6 rounded-full shadow-sm transition-transform duration-500 ${dark?'translate-x-6 bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,.35)]':'bg-white'}`}/></div></button><button type="button" onClick={chooseDownloadFolder} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex min-w-0 items-center gap-4"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><FolderOpen size={17}/></div><div className="min-w-0"><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download location</div><div className="mt-1 max-w-[700px] truncate text-xs text-slate-500">{downloadPath}</div></div></div><ChevronRight size={16} className="text-slate-400"/></button><button type="button" onClick={onUpdates} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Upload size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Updates</div><div className="mt-1 text-xs text-slate-500">Check for a newer version.</div></div></div><ChevronRight size={16} className="text-slate-400"/></button><div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><History size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download history</div><div className="mt-1 text-xs text-slate-500">{historyCount} saved entries</div></div></div><Status dark={dark} tone="blue">Local</Status></div><div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Monitor size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Application</div><div className="mt-1 text-xs text-slate-500">VIDORA Desktop</div></div></div><span className="text-xs font-semibold text-slate-400">{appVersion}</span></div></Glass></section> }
+function AccountPage({
+  dark,
+  user,
+  authLoading,
+  authError,
+  authMessage,
+  onGoogleSignIn,
+  onSignOut,
+}) {
+  const signedIn = Boolean(user)
+  const displayName = user?.displayName || 'Google account'
+  const displayEmail = user?.email || 'VIDORA account'
+  const photoURL = user?.photoURL || ''
+
+  return (
+    <section className="mx-auto max-w-[760px] space-y-8 animate-fadeSlideIn">
+      <div className="text-center">
+        <div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark ? 'text-cyan-400' : 'text-blue-600'}`}>ACCOUNT</div>
+        <h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark ? 'text-white' : 'text-slate-900'}`}>
+          {signedIn ? 'Your VIDORA account.' : 'VIDORA ACCOUNT'}
+        </h1>
+        <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-slate-500">
+          {signedIn
+            ? 'Your Google account is connected. Your VIDORA trial is active while time remains.'
+            : 'Sign in with Google to unlock VIDORA. A Google account is required to use the application.'}
+        </p>
+      </div>
+
+      <Glass dark={dark} hover={false} className="relative overflow-hidden p-6 sm:p-8">
+        <div className={`absolute left-1/2 top-0 h-48 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full blur-[90px] ${dark ? 'bg-cyan-400/10' : 'bg-blue-400/10'}`} />
+        <div className="relative">
+          {signedIn ? (
+            <div className="space-y-6">
+              <div className={`flex flex-col gap-5 rounded-[24px] border p-5 sm:flex-row sm:items-center ${dark ? 'border-white/10 bg-white/[.035]' : 'border-white/80 bg-white/55 shadow-soft-card'}`}>
+                <div className={`grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl border ${dark ? 'border-cyan-400/15 bg-cyan-400/[.05] text-cyan-300' : 'border-blue-200 bg-blue-50 text-blue-600'}`}>
+                  {photoURL ? <img src={photoURL} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : <UserCircle size={25} strokeWidth={1.6} />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className={`text-[9px] font-semibold uppercase tracking-[.18em] ${dark ? 'text-slate-600' : 'text-slate-400'}`}>SIGNED IN WITH GOOGLE</div>
+                  <div className={`mt-1 truncate text-base font-semibold ${dark ? 'text-zinc-100' : 'text-slate-800'}`}>{displayName}</div>
+                  <div className="mt-1 truncate text-xs text-slate-500">{displayEmail}</div>
+                </div>
+                <Status dark={dark} tone="green">Connected</Status>
+              </div>
+
+              <div className={`rounded-[22px] border p-5 ${dark ? 'border-white/10 bg-white/[.025]' : 'border-white/80 bg-white/45'}`}>
+                <div className={`text-sm font-semibold ${dark ? 'text-zinc-100' : 'text-slate-800'}`}>30-minute trial</div>
+                <p className="mt-2 text-xs leading-6 text-slate-500">Your trial begins after successful authentication and remains tied to this installation.</p>
+              </div>
+
+              {authError && <div className={`rounded-2xl border px-4 py-3 text-xs leading-5 ${dark ? 'border-rose-400/15 bg-rose-400/[.05] text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-600'}`}>{authError}</div>}
+
+              <div className="flex flex-wrap gap-3">
+                <Button dark={dark} onClick={onSignOut} icon={LogOut} variant="secondary" disabled={authLoading}>
+                  {authLoading ? 'Signing out…' : 'Sign out'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="text-center">
+                <div className={`mx-auto grid h-16 w-16 place-items-center rounded-[22px] border ${dark ? 'border-white/10 bg-white/[.04] text-cyan-300' : 'border-white/80 bg-white/65 text-blue-600 shadow-sm'}`}>
+                  <UserCircle size={30} strokeWidth={1.5} />
+                </div>
+                <div className={`mt-6 text-[9px] font-semibold uppercase tracking-[.18em] ${dark ? 'text-slate-600' : 'text-slate-400'}`}>GOOGLE ACCOUNT</div>
+                <h2 className={`mt-2 text-2xl font-medium tracking-tight ${dark ? 'text-zinc-100' : 'text-slate-800'}`}>Sign in to VIDORA.</h2>
+                <p className="mx-auto mt-2 max-w-md text-xs leading-6 text-slate-500">Use your Google account for a secure, password-free VIDORA login.</p>
+              </div>
+
+              {authError && <div className={`mt-7 rounded-2xl border px-4 py-3 text-xs leading-5 ${dark ? 'border-rose-400/15 bg-rose-400/[.05] text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-600'}`}>{authError}</div>}
+              {authMessage && <div className={`mt-4 rounded-2xl border px-4 py-3 text-xs leading-5 ${dark ? 'border-emerald-400/15 bg-emerald-400/[.05] text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-600'}`}>{authMessage}</div>}
+
+              <div className="mt-7 flex justify-center">
+                <Button dark={dark} onClick={onGoogleSignIn} icon={LogIn} disabled={authLoading} className="min-w-[220px]">
+                  {authLoading ? 'Connecting…' : 'Continue with Google'}
+                </Button>
+              </div>
+
+              <div className={`mt-6 rounded-[22px] border p-5 ${dark ? 'border-white/10 bg-white/[.025]' : 'border-white/80 bg-white/45'}`}>
+                <div className={`text-sm font-semibold ${dark ? 'text-zinc-100' : 'text-slate-800'}`}>Google sign-in required</div>
+                <p className="mt-2 text-xs leading-6 text-slate-500">VIDORA features remain locked until you authenticate with Google.</p>
+              </div>
+            </>
+          )}
+        </div>
+      </Glass>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        {[
+          ['GOOGLE', 'Password-free', 'VIDORA never asks you to create or store a separate password.'],
+          ['SECURE SESSION', 'Persistent login', 'Firebase keeps the signed-in session available between launches.'],
+          ['REQUIRED', 'Google login', 'Authentication is required before any VIDORA feature can be used.'],
+        ].map(([label, title, text]) => (
+          <Glass key={label} dark={dark} className="p-5">
+            <div className={`text-[9px] font-semibold uppercase tracking-[.18em] ${dark ? 'text-slate-600' : 'text-slate-400'}`}>{label}</div>
+            <div className={`mt-3 text-sm font-semibold ${dark ? 'text-zinc-100' : 'text-slate-800'}`}>{title}</div>
+            <div className="mt-2 text-xs leading-5 text-slate-500">{text}</div>
+          </Glass>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SettingsPage({ dark, setDark, downloadPath, historyCount, chooseDownloadFolder, onUpdates, onAccount, appVersion = FALLBACK_APP_VERSION }) {
+  return <section className="space-y-8 animate-fadeSlideIn">
+    <div>
+      <div className={`text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-cyan-400':'text-blue-600'}`}>SETTINGS</div>
+      <h1 className={`mt-4 text-4xl font-medium tracking-[-.05em] sm:text-5xl ${dark?'text-white':'text-slate-900'}`}>Preferences.</h1>
+      <p className="mt-4 text-sm text-slate-500">Tune your VIDORA workspace.</p>
+    </div>
+    <Glass dark={dark} hover={false} className="overflow-hidden divide-y">
+      <button type="button" onClick={()=>setDark(v=>!v)} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}>
+        <div className="flex items-center gap-4">
+          <div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}>{dark?<Moon size={17}/>:<Sun size={17}/>}</div>
+          <div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Appearance</div><div className="mt-1 text-xs text-slate-500">Nebula dark theme or Orion light theme.</div></div>
+        </div>
+        <div className={`relative h-8 w-14 rounded-full border p-1 ${dark?'border-cyan-400/25 bg-cyan-400/10':'border-slate-200 bg-slate-100'}`}><div className={`h-6 w-6 rounded-full shadow-sm transition-transform duration-500 ${dark?'translate-x-6 bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,.35)]':'bg-white'}`}/></div>
+      </button>
+      <button type="button" onClick={chooseDownloadFolder} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}>
+        <div className="flex min-w-0 items-center gap-4"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><FolderOpen size={17}/></div><div className="min-w-0"><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download location</div><div className="mt-1 max-w-[700px] truncate text-xs text-slate-500">{downloadPath}</div></div></div><ChevronRight size={16} className="text-slate-400"/>
+      </button>
+      <button type="button" onClick={onAccount} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}>
+        <div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><UserCircle size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Account</div><div className="mt-1 text-xs text-slate-500">Required Google sign-in for VIDORA access.</div></div></div><ChevronRight size={16} className="text-slate-400"/>
+      </button>
+      <button type="button" onClick={onUpdates} className={`flex w-full items-center justify-between gap-5 px-6 py-6 text-left transition ${dark?'hover:bg-white/[.02]':'hover:bg-white/35'}`}>
+        <div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Upload size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Updates</div><div className="mt-1 text-xs text-slate-500">Check for a newer version.</div></div></div><ChevronRight size={16} className="text-slate-400"/>
+      </button>
+      <div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><History size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Download history</div><div className="mt-1 text-xs text-slate-500">{historyCount} saved entries</div></div></div><Status dark={dark} tone="blue">Local</Status></div>
+      <div className="flex items-center justify-between gap-5 px-6 py-6"><div className="flex items-center gap-4"><div className={`grid h-11 w-11 place-items-center rounded-2xl border ${dark?'border-white/10 bg-white/[.04] text-cyan-300':'border-white/80 bg-white/65 text-slate-500'}`}><Monitor size={17}/></div><div><div className={`text-sm font-semibold ${dark?'text-zinc-100':'text-slate-800'}`}>Application</div><div className="mt-1 text-xs text-slate-500">VIDORA Desktop</div></div></div><span className="text-xs font-semibold text-slate-400">{formatAppVersion(appVersion)}</span></div>
+    </Glass>
+  </section>
+}
 
 export default function App() {
   const [active,setActive]=useState('home')
+  const [showGettingStarted,setShowGettingStarted]=useState(()=>localStorage.getItem(ONBOARDING_KEY)!=='true')
   const [appVersion,setAppVersion]=useState(FALLBACK_APP_VERSION)
   const [darkState,setDarkState]=useState(()=>localStorage.getItem(THEME_KEY)!=='light')
   const [downloadPath,setDownloadPath]=useState(()=>localStorage.getItem(DOWNLOAD_PATH_KEY)||'Default Downloads folder')
@@ -558,6 +756,13 @@ export default function App() {
   const [bulkText,setBulkText]=useState('')
   const [bulkQuality,setBulkQuality]=useState('best')
   const [bulkState,setBulkState]=useState({status:'idle',message:'',total:0,successful:0,failed:0,filename:'',downloadUrl:'',jobId:''})
+  const [user,setUser]=useState(null)
+  const [authLoading,setAuthLoading]=useState(true)
+  const [authError,setAuthError]=useState('')
+  const [authMessage,setAuthMessage]=useState('')
+  const [updateAvailable,setUpdateAvailable]=useState(false)
+  const [trialStartedAt,setTrialStartedAt]=useState(()=>{const raw=localStorage.getItem(TRIAL_STARTED_AT_KEY);const parsed=Number(raw||0);return Number.isFinite(parsed)&&parsed>0?parsed:0})
+  const [trialLocked,setTrialLocked]=useState(false)
   const qualityRef=useRef(null)
   const downloadSectionRef=useRef(null)
   const bulkRef=useRef(null)
@@ -568,6 +773,86 @@ export default function App() {
   const bulkUrls=useMemo(()=>bulkText.split(/\r?\n|,/).map(v=>v.trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i),[bulkText])
 
   useEffect(()=>{let cancelled=false;const loadVersion=async()=>{try{const version=await window.desktop?.getVersion?.();if(!cancelled&&version)setAppVersion(version)}catch(error){console.warn('VIDORA version lookup failed:',error)}};loadVersion();return()=>{cancelled=true}},[])
+
+  useEffect(() => {
+    let mounted = true
+    const subscribe = window.desktop?.onUpdaterEvent
+    const handleUpdateEvent = (payload = {}) => {
+      if (!mounted) return
+      if (payload.event === 'update-available' || payload.event === 'update-downloaded') {
+        setUpdateAvailable(true)
+      }
+    }
+    const unsubscribe = typeof subscribe === 'function' ? subscribe(handleUpdateEvent) : undefined
+
+    const checkAtStartup = async () => {
+      try {
+        const result = await window.desktop?.checkForUpdates?.()
+        if (!mounted) return
+        if (result?.status === 'available') setUpdateAvailable(true)
+      } catch (error) {
+        console.warn('VIDORA startup update check failed:', error)
+      }
+    }
+
+    checkAtStartup()
+    return () => {
+      mounted = false
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (active === 'updates') setUpdateAvailable(false)
+  }, [active])
+
+  useEffect(() => {
+    let mounted = true
+
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      if (!mounted) return
+      setUser(nextUser ?? null)
+      setAuthLoading(false)
+      if (nextUser) setAuthError('')
+    })
+
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
+  }, [])
+
+  useEffect(()=>{
+    if (!user) {
+      setTrialLocked(Boolean(trialStartedAt && Date.now() >= trialStartedAt + TRIAL_DURATION_MS))
+      return undefined
+    }
+    if (!trialStartedAt) {
+      const started=Date.now()
+      localStorage.setItem(TRIAL_STARTED_AT_KEY,String(started))
+      localStorage.setItem(TRIAL_UID_KEY,user.uid)
+      setTrialStartedAt(started)
+    } else if (!localStorage.getItem(TRIAL_UID_KEY)) {
+      localStorage.setItem(TRIAL_UID_KEY,user.uid)
+    }
+    return undefined
+  },[user,trialStartedAt])
+
+  useEffect(()=>{
+    if (!trialStartedAt) return undefined
+    const check=()=>setTrialLocked(Date.now() >= trialStartedAt + TRIAL_DURATION_MS)
+    check()
+    const timer=window.setInterval(check,1000)
+    return ()=>window.clearInterval(timer)
+  },[trialStartedAt])
+
+  useEffect(()=>{
+    if (trialLocked) {
+      setVideoInfo(null)
+      setUrl('')
+      setError('Your 30-minute VIDORA trial has expired. Access is locked.')
+    }
+  },[trialLocked])
 
   useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.style.colorScheme=dark?'dark':'light';document.body.style.background=dark?'#000':'#f7f9fa';document.body.style.color=dark?'#fff':'#1a1a24'},[dark])
   useEffect(()=>localStorage.setItem(HISTORY_KEY,JSON.stringify(history)),[history])
@@ -584,6 +869,67 @@ export default function App() {
   const chooseDownloadFolder=async()=>{try{const selected=await window.desktop?.chooseFolder?.();if(selected){setDownloadPath(selected);setError('')}}catch(e){console.error(e);setError('Windows could not open the folder picker.')}}
   const addHistory=entry=>setHistory(current=>[{id:makeJobId(),...entry,createdAt:new Date().toISOString()},...current].slice(0,100))
 
+  const handleGoogleSignIn = async () => {
+    setAuthError('')
+    setAuthMessage('')
+    setAuthLoading(true)
+
+    try {
+      const provider = new GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+
+      const result = await signInWithPopup(auth, provider)
+      setUser(result?.user ?? auth.currentUser ?? null)
+      setAuthMessage('Signed in with Google successfully.')
+      setActive('account')
+    } catch (error) {
+      console.error('VIDORA Google sign-in failed:', error)
+      const code = error?.code || ''
+
+      if (code === 'auth/popup-closed-by-user') {
+        setAuthMessage('Google sign-in was cancelled. Nothing was changed. Click Continue with Google whenever you are ready to try again.')
+        return
+      }
+
+      if (code === 'auth/popup-blocked') {
+        setAuthError('Google sign-in was blocked. Please try again.')
+        return
+      }
+
+      if (code === 'auth/unauthorized-domain') {
+        setAuthError('This VIDORA sign-in domain is not authorized in Firebase.')
+        return
+      }
+
+      if (code === 'auth/operation-not-allowed') {
+        setAuthError('Google sign-in is not enabled in the Firebase project.')
+        return
+      }
+
+      setAuthError(error?.message || 'Google sign-in failed. Please try again.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const signOut = async () => {
+    setAuthError('')
+    setAuthMessage('')
+    setAuthLoading(true)
+
+    try {
+      await firebaseSignOut(auth)
+      setUser(null)
+      setAuthMessage('You have been signed out.')
+      setActive('account')
+    } catch (error) {
+      console.error('VIDORA Firebase sign-out failed:', error)
+      setAuthError(error?.message || 'Could not sign out.')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
   const analyze=async()=>{const cleanUrl=url.trim();if(!cleanUrl){setError('Paste a video link first.');return}setError('');setVideoInfo(null);setIsAnalyzing(true);try{const response=await fetch(`${API_BASE_URL}/info`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:cleanUrl})});const data=await response.json().catch(()=>null);if(!response.ok)throw new Error(data?.detail||`Analyze failed with status ${response.status}`);setVideoInfo(data);smoothScrollTo(qualityRef)}catch(e){setError(e?.message||'Could not analyze this link.')}finally{setIsAnalyzing(false)}}
   const paste=async()=>{try{const text=await navigator.clipboard.readText();if(!text.trim())throw new Error('Clipboard is empty.');setUrl(text.trim());setError('')}catch(e){setError(e?.message||'Clipboard access is unavailable.')}}
 
@@ -594,9 +940,18 @@ export default function App() {
   const startBulkDownload=async()=>{if(!bulkUrls.length){setError('Add at least one video link.');return}if(bulkUrls.length>20){setError('Maximum 20 links per batch.');return}const jobId=makeJobId();setError('');setBulkState({status:'processing',message:'Preparing your batch...',total:bulkUrls.length,successful:0,failed:0,filename:'',downloadUrl:'',jobId});smoothScrollTo(bulkRef);try{const response=await fetch(`${API_BASE_URL}/bulk-download`,{method:'POST',headers:{'Content-Type':'application/json','X-VIDORA-Job-ID':jobId},body:JSON.stringify({urls:bulkUrls,quality:bulkQuality,download_path:downloadPath==='Default Downloads folder'?null:downloadPath})});const data=await response.json().catch(()=>null);if(response.status===499){setBulkState(c=>({...c,status:'cancelled',message:'Bulk download cancelled.'}));smoothScrollTo(bulkRef);return}if(!response.ok)throw new Error(data?.detail||`Bulk download failed with status ${response.status}`);setBulkState({status:'success',message:data?.message||'Batch completed.',total:data?.total||bulkUrls.length,successful:data?.successful||0,failed:data?.failed||0,filename:data?.filename||'',downloadUrl:data?.download_url?`${API_BASE_URL}${data.download_url}`:'',jobId});smoothScrollTo(bulkRef);if(data?.filename)addHistory({filename:data.filename,format:`BULK • ${bulkQuality}`,title:`Batch of ${bulkUrls.length} links`,url:bulkUrls[0]})}catch(e){setBulkState({status:'error',message:e?.message||'Bulk download failed.',total:bulkUrls.length,successful:0,failed:bulkUrls.length,filename:'',downloadUrl:'',jobId});smoothScrollTo(bulkRef)}}
   const cancelBulkDownload=async()=>{const jobId=bulkState.jobId;if(!jobId||bulkState.status!=='processing')return;setBulkState(c=>({...c,status:'cancelling',message:'Cancelling bulk download...'}));try{const response=await fetch(`${API_BASE_URL}/cancel/${encodeURIComponent(jobId)}`,{method:'POST'});const data=await response.json().catch(()=>null);if(!response.ok)throw new Error(data?.detail||'Could not cancel the bulk download.');smoothScrollTo(bulkRef)}catch(e){setBulkState(c=>({...c,status:'processing',message:'Bulk download is still running.'}));setError(e?.message||'Could not cancel the bulk download.');smoothScrollTo(bulkRef)}}
 
-  const title=active==='downloader'?'Downloader':active==='bulk'?'Bulk':active==='downloads'?'Downloads':active==='history'?'History':active==='updates'?'Updates':active==='settings'?'Settings':'Home'
-  return <div className={dark?'app-root app-dark':'app-root app-light'}>{dark?<div className="nebula-grid"/>:<div className="orion-background-orbs"><span/><span/><span/></div>}<div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1700px]"><aside className="sticky top-0 hidden h-screen w-[270px] shrink-0 p-4 lg:block"><div className={dark?'sidebar-dark nebula-gradient-border':'sidebar-light-orion'}><div className="flex items-center gap-3 px-3 py-3"><div className={`grid h-11 w-11 place-items-center overflow-hidden rounded-2xl border ${dark?'border-white/10 bg-white/[.05]':'border-white/80 bg-white/75 shadow-sm'}`}><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-8 w-8 object-contain"/></div><div><div className={`text-sm font-semibold tracking-[.12em] ${dark?'text-white':'text-slate-800'}`}>VIDORA</div><div className={`mt-1 text-[10px] ${dark?'text-slate-600':'text-slate-400'}`}>Your media. Your way.</div></div></div><div className={`mt-7 px-3 text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-slate-600':'text-slate-400'}`}>Workspace</div><div className="mt-3 space-y-1.5">{navItems.map(nav=>{const selected=active===nav.id;return <button key={nav.id} type="button" onClick={()=>setActive(nav.id)} className={`nav-button ${selected?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Icon icon={nav.icon} size={16}/></span>{nav.label}</button>})}</div><div className="mt-auto space-y-1.5 pt-4"><button type="button" onClick={()=>setActive('updates')} className={`nav-button ${active==='updates'?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Upload size={16}/></span>Updates</button><button type="button" onClick={()=>setActive('settings')} className={`nav-button ${active==='settings'?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Settings size={16}/></span>Settings</button></div></div></aside>
-    <div className="min-w-0 flex-1"><header className="sticky top-0 z-40 px-4 pt-4 sm:px-6 lg:px-8"><div className={`topbar ${dark?'topbar-dark':'topbar-light'}`}><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[.04] lg:hidden"><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-7 w-7 object-contain"/></div><div><div className={`text-sm font-medium ${dark?'text-white':'text-slate-800'}`}>{title}</div><div className={`hidden text-[9px] uppercase tracking-[.16em] sm:block ${dark?'text-slate-600':'text-slate-400'}`}>VIDORA desktop workspace</div></div></div><div className="flex items-center gap-2"><button type="button" onClick={()=>setDark(v=>!v)} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`} title={dark?'Light theme':'Dark theme'}>{dark?<Sun size={16}/>:<Moon size={16}/>}</button><span className={`hidden rounded-full border px-3 py-2 text-[9px] font-semibold uppercase tracking-[.14em] sm:inline-flex ${dark?'border-white/10 bg-white/[.04] text-slate-600':'border-white/75 bg-white/50 text-slate-400'}`}>v{appVersion}</span><button type="button" onClick={()=>setActive('settings')} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`}><Settings size={16}/></button></div></div></header><main className="mx-auto w-full max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">{active==='home'&&<HomePage dark={dark} onStart={()=>setActive('downloader')}/>} {active==='downloader'&&<DownloaderPage dark={dark} url={url} setUrl={setUrl} videoInfo={videoInfo} videoFormats={videoFormats} audioFormats={audioFormats} isAnalyzing={isAnalyzing} error={error} setError={setError} analyze={analyze} paste={paste} download={download} cancelDownload={cancelDownload} downloadState={downloadState} qualityRef={qualityRef} downloadSectionRef={downloadSectionRef}/>} {active==='bulk'&&<BulkPage dark={dark} bulkText={bulkText} setBulkText={setBulkText} bulkQuality={bulkQuality} setBulkQuality={setBulkQuality} bulkState={bulkState} startBulkDownload={startBulkDownload} cancelBulkDownload={cancelBulkDownload} bulkRef={bulkRef}/>} {active==='downloads'&&<DownloadsPage dark={dark} downloads={downloads}/>} {active==='history'&&<HistoryPage dark={dark} history={history} setHistory={setHistory}/>} {active==='updates'&&<UpdatesPage dark={dark} appVersion={appVersion}/>} {active==='settings'&&<SettingsPage dark={dark} setDark={setDark} downloadPath={downloadPath} historyCount={history.length} chooseDownloadFolder={chooseDownloadFolder} onUpdates={()=>setActive('updates')} appVersion={appVersion}/>}</main></div></div><style>{STYLE}</style></div>
+  const canUseApp=Boolean(user)&&!authLoading&&!trialLocked
+  const guardedSetActive=(next)=>{
+    if (!canUseApp) { setActive('account'); return }
+    setActive(next)
+  }
+
+  const title=active==='downloader'?'Downloader':active==='bulk'?'Bulk':active==='downloads'?'Downloads':active==='history'?'History':active==='updates'?'Updates':active==='settings'?'Settings':active==='account'?'Account':'Home'
+  if (trialLocked) return <div className={dark?'app-root app-dark min-h-screen':'app-root app-light min-h-screen'}><div className="mx-auto flex min-h-screen max-w-[760px] items-center px-5 py-10"><Glass dark={dark} hover={false} className="w-full p-8 text-center sm:p-12"><div className={`mx-auto grid h-16 w-16 place-items-center rounded-full border ${dark?'border-rose-400/20 bg-rose-400/[.06] text-rose-300':'border-rose-200 bg-rose-50 text-rose-600'}`}><ShieldCheck size={28}/></div><div className={`mt-6 text-3xl font-medium tracking-tight ${dark?'text-white':'text-slate-900'}`}>Trial expired</div><p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-slate-500">Your 30-minute VIDORA trial has ended. Downloader, bulk downloads, history and other application features are locked.</p><div className="mt-6"><Status dark={dark} tone="red">ACCESS LOCKED</Status></div></Glass></div><style>{STYLE}</style></div>
+  if (showGettingStarted) return <GettingStartedPage dark={dark} setDark={setDark} downloadPath={downloadPath} chooseDownloadFolder={chooseDownloadFolder} onComplete={()=>setShowGettingStarted(false)} user={user} authLoading={authLoading} authError={authError} authMessage={authMessage} onGoogleSignIn={handleGoogleSignIn} />
+  if (!authLoading && !user) return <div className={dark?'app-root app-dark':'app-root app-light'}><main className="mx-auto w-full max-w-[1280px] px-4 py-10 sm:px-6 lg:px-10"><AccountPage dark={dark} user={user} authLoading={authLoading} authError={authError} authMessage={authMessage} onGoogleSignIn={handleGoogleSignIn} onSignOut={signOut}/></main><style>{STYLE}</style></div>
+  return <div className={dark?'app-root app-dark':'app-root app-light'}>{dark?<div className="nebula-grid"/>:<div className="orion-background-orbs"><span/><span/><span/></div>}<div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1700px]"><aside className="sticky top-0 hidden h-screen w-[270px] shrink-0 p-4 lg:block"><div className={dark?'sidebar-dark nebula-gradient-border':'sidebar-light-orion'}><div className="flex items-center gap-3 px-3 py-3"><div className={`grid h-11 w-11 place-items-center overflow-hidden rounded-2xl border ${dark?'border-white/10 bg-white/[.05]':'border-white/80 bg-white/75 shadow-sm'}`}><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-8 w-8 object-contain"/></div><div><div className={`text-sm font-semibold tracking-[.12em] ${dark?'text-white':'text-slate-800'}`}>VIDORA</div><div className={`mt-1 text-[10px] ${dark?'text-slate-600':'text-slate-400'}`}>Your media. Your way.</div></div></div><div className={`mt-7 px-3 text-[9px] font-semibold uppercase tracking-[.2em] ${dark?'text-slate-600':'text-slate-400'}`}>Workspace</div><div className="mt-3 space-y-1.5">{navItems.map(nav=>{const selected=active===nav.id;return <button key={nav.id} type="button" onClick={()=>guardedSetActive(nav.id)} className={`nav-button ${selected?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Icon icon={nav.icon} size={16}/></span>{nav.label}</button>})}</div><div className="mt-auto space-y-1.5 pt-4"><button type="button" onClick={()=>setActive('account')} className={`nav-button ${active==='account'?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><UserCircle size={16}/></span>Account</button><button type="button" onClick={()=>guardedSetActive('updates')} className={`nav-button ${active==='updates'?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Upload size={16}/></span><span className="flex-1">Updates</span>{updateAvailable&&<span className={`h-2.5 w-2.5 rounded-full ${dark?'bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,.65)]':'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,.35)]'}`} aria-label="Update available"/>}</button><button type="button" onClick={()=>guardedSetActive('settings')} className={`nav-button ${active==='settings'?(dark?'nav-selected-dark':'nav-selected-light-orion'):(dark?'nav-idle-dark':'nav-idle-light-orion')}`}><span className="nav-icon"><Settings size={16}/></span>Settings</button></div></div></aside>
+    <div className="min-w-0 flex-1"><header className="sticky top-0 z-40 px-4 pt-4 sm:px-6 lg:px-8"><div className={`topbar ${dark?'topbar-dark':'topbar-light'}`}><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/[.04] lg:hidden"><img src="/vidora-sidebar-logo.png" alt="VIDORA" className="h-7 w-7 object-contain"/></div><div><div className={`text-sm font-medium ${dark?'text-white':'text-slate-800'}`}>{title}</div><div className={`hidden text-[9px] uppercase tracking-[.16em] sm:block ${dark?'text-slate-600':'text-slate-400'}`}>VIDORA desktop workspace</div></div></div><div className="flex items-center gap-2"><button type="button" onClick={()=>setDark(v=>!v)} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`} title={dark?'Light theme':'Dark theme'}>{dark?<Sun size={16}/>:<Moon size={16}/>}</button><span className={`hidden rounded-full border px-3 py-2 text-[9px] font-semibold uppercase tracking-[.14em] sm:inline-flex ${dark?'border-white/10 bg-white/[.04] text-slate-600':'border-white/75 bg-white/50 text-slate-400'}`}>v{formatAppVersion(appVersion)}</span>{updateAvailable&&<button type="button" onClick={()=>guardedSetActive('updates')} className={`grid h-8 w-8 place-items-center rounded-full border ${dark?'border-cyan-400/15 bg-cyan-400/[.05] text-cyan-300':'border-blue-200 bg-blue-50 text-blue-600'}`} title="Update available"><span className={`h-2.5 w-2.5 rounded-full ${dark?'bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,.65)]':'bg-blue-500'}`}/></button>}<span className={`hidden rounded-full border px-3 py-2 text-[9px] font-semibold uppercase tracking-[.14em] sm:inline-flex ${dark?'border-cyan-400/15 bg-cyan-400/[.04] text-cyan-300':'border-blue-200 bg-blue-50/70 text-blue-600'}`}>{trialStartedAt?`TRIAL ${Math.max(0,Math.ceil((trialStartedAt+TRIAL_DURATION_MS-Date.now())/60000))} MIN`:'LOGIN REQUIRED'}</span><button type="button" onClick={()=>setActive('account')} className={`hidden max-w-[180px] items-center gap-2 rounded-full border px-3 py-2 text-left transition sm:inline-flex ${dark?'border-white/10 bg-white/[.04] text-slate-400 hover:text-white':'border-white/75 bg-white/50 text-slate-500 hover:text-slate-800'}`} title="Account"><UserCircle size={14}/><span className="truncate text-[9px] font-semibold uppercase tracking-[.12em]">{user?.email ? user.email : 'Account'}</span></button><button type="button" onClick={()=>guardedSetActive('settings')} className={`theme-switch ${dark?'theme-switch-dark':'theme-switch-light'}`}><Settings size={16}/></button></div></div></header><main className="mx-auto w-full max-w-[1280px] px-4 py-8 sm:px-6 lg:px-10 lg:py-12">{active==='home'&&<HomePage dark={dark} onStart={()=>guardedSetActive('downloader')}/>} {active==='downloader'&&<DownloaderPage dark={dark} url={url} setUrl={setUrl} videoInfo={videoInfo} videoFormats={videoFormats} audioFormats={audioFormats} isAnalyzing={isAnalyzing} error={error} setError={setError} analyze={analyze} paste={paste} download={download} cancelDownload={cancelDownload} downloadState={downloadState} qualityRef={qualityRef} downloadSectionRef={downloadSectionRef}/>} {active==='bulk'&&<BulkPage dark={dark} bulkText={bulkText} setBulkText={setBulkText} bulkQuality={bulkQuality} setBulkQuality={setBulkQuality} bulkState={bulkState} startBulkDownload={startBulkDownload} cancelBulkDownload={cancelBulkDownload} bulkRef={bulkRef}/>} {active==='downloads'&&<DownloadsPage dark={dark} downloads={downloads}/>} {active==='history'&&<HistoryPage dark={dark} history={history} setHistory={setHistory}/>} {active==='updates'&&<UpdatesPage dark={dark} appVersion={appVersion}/>} {active==='account'&&<AccountPage dark={dark} user={user} authLoading={authLoading} authError={authError} authMessage={authMessage} onGoogleSignIn={handleGoogleSignIn} onSignOut={signOut}/>} {active==='settings'&&<SettingsPage dark={dark} setDark={setDark} downloadPath={downloadPath} historyCount={history.length} chooseDownloadFolder={chooseDownloadFolder} onUpdates={()=>setActive('updates')} onAccount={()=>setActive('account')} appVersion={appVersion}/>}</main></div></div><style>{STYLE}</style></div>
 }
 
 const STYLE = `
@@ -634,4 +989,10 @@ const STYLE = `
 .theme-switch{width:36px;height:36px;border-radius:999px;border:1px solid;display:grid;place-items:center;transition:.3s}.theme-switch-dark{border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:#67e8f9}.theme-switch-light{border-color:rgba(255,255,255,.8);background:rgba(255,255,255,.6);color:#475569}.theme-switch:hover{transform:translateY(-1px)}
 @media (max-width:900px){.showcase-card{width:300px}.orion-device{transform:scale(.86)}.orion-device:hover{transform:translateY(-5px) rotateY(-3deg) scale(.88)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* GETTING STARTED — the action buttons intentionally reuse the exact Button/primary/secondary theme system already used by VIDORA. */
+.onboarding-page{position:relative;min-height:100vh;overflow-x:hidden}.onboarding-nav{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 16px;border-radius:999px;backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}.onboarding-nav-dark{background:rgba(5,5,8,.74);border:1px solid rgba(255,255,255,.1);box-shadow:0 18px 45px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.05)}.onboarding-nav-light{background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.82);box-shadow:0 14px 40px rgba(15,23,42,.05),inset 0 1px 0 rgba(255,255,255,.9)}.onboarding-nebula-grid{position:fixed;inset:0;pointer-events:none;opacity:.35;background-image:linear-gradient(rgba(255,255,255,.017) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.017) 1px,transparent 1px);background-size:48px 48px}.onboarding-nebula-stars{position:fixed;inset:0;pointer-events:none;opacity:.45;background-image:radial-gradient(circle at 12% 20%,rgba(255,255,255,.7) 0 1px,transparent 1.5px),radial-gradient(circle at 70% 22%,rgba(103,232,249,.65) 0 1px,transparent 1.5px);background-size:180px 180px,240px 240px;animation:onboardingStarDrift 18s linear infinite}.onboarding-nebula-glow-a,.onboarding-nebula-glow-b{position:fixed;pointer-events:none;border-radius:9999px;filter:blur(90px)}.onboarding-nebula-glow-a{width:500px;height:500px;left:-180px;top:120px;background:rgba(34,211,238,.075)}.onboarding-nebula-glow-b{width:520px;height:520px;right:-180px;bottom:-160px;background:rgba(99,102,241,.08)}@keyframes onboardingStarDrift{to{transform:translateY(-30px)}}.onboarding-orion-orbs{position:fixed;inset:0;pointer-events:none;overflow:hidden}.onboarding-orion-orbs span{position:absolute;border-radius:9999px;filter:blur(90px)}.onboarding-orion-orbs span:nth-child(1){width:420px;height:420px;left:-150px;top:70px;background:rgba(125,211,252,.16)}.onboarding-orion-orbs span:nth-child(2){width:360px;height:360px;right:-120px;top:50px;background:rgba(191,219,254,.17)}.onboarding-orion-orbs span:nth-child(3){width:420px;height:420px;left:38%;bottom:-260px;background:rgba(226,232,240,.42)}.onboarding-pill{display:inline-flex;align-items:center;gap:8px;border-radius:999px;border:1px solid;padding:8px 13px;font-size:9px;font-weight:700;letter-spacing:.18em}.onboarding-pill-dark{border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.035);color:#cbd5e1}.onboarding-pill-light{border-color:rgba(255,255,255,.82);background:rgba(255,255,255,.65);color:#64748b;box-shadow:0 8px 28px rgba(15,23,42,.04)}.onboarding-dot{height:6px;border-radius:999px;transition:all .4s cubic-bezier(.23,1,.32,1)}.onboarding-dot-dark{width:8px;background:rgba(255,255,255,.12)}.onboarding-dot-dark-active{width:36px;background:#67e8f9;box-shadow:0 0 14px rgba(34,211,238,.35)}.onboarding-dot-light{width:8px;background:#cbd5e1}.onboarding-dot-light-active{width:36px;background:#2563eb;box-shadow:0 5px 14px rgba(37,99,235,.16)}.onboarding-back .nebula-secondary-arrow,.onboarding-back .orion-secondary-icon{transform:rotate(180deg)}.onboarding-back:hover .nebula-secondary-arrow,.onboarding-back:hover .orion-secondary-icon{transform:translateX(-2px) rotate(180deg)}.onboarding-panel{position:relative;min-height:520px;overflow:hidden;border-radius:32px}.onboarding-panel-dark{border:1px solid rgba(255,255,255,.09);background:linear-gradient(135deg,rgba(255,255,255,.05),rgba(255,255,255,.01));box-shadow:0 30px 80px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.06);backdrop-filter:blur(24px)}.onboarding-panel-light{border:1px solid rgba(255,255,255,.82);background:linear-gradient(135deg,rgba(255,255,255,.62),rgba(255,255,255,.2));box-shadow:0 35px 80px rgba(15,23,42,.07),inset 0 2px 20px rgba(255,255,255,.7);backdrop-filter:blur(25px)}.onboarding-panel-glow-cyan,.onboarding-panel-glow-indigo{position:absolute;border-radius:9999px;filter:blur(80px);pointer-events:none}.onboarding-panel-glow-cyan{width:300px;height:300px;right:5%;top:5%;background:rgba(34,211,238,.09)}.onboarding-panel-glow-indigo{width:280px;height:280px;left:0;bottom:0;background:rgba(99,102,241,.08)}.onboarding-nebula-core{position:relative;width:220px;height:220px;display:grid;place-items:center;border-radius:48px;border:1px solid rgba(34,211,238,.12);background:rgba(255,255,255,.035);box-shadow:0 30px 80px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.07);animation:onboardingCoreFloat 6s ease-in-out infinite}.onboarding-nebula-core-inner{width:104px;height:104px;position:relative;z-index:3;display:grid;place-items:center;border-radius:30px;border:1px solid rgba(34,211,238,.2);background:rgba(34,211,238,.05);color:#67e8f9;box-shadow:0 0 60px rgba(34,211,238,.1);animation:onboardingCorePulse 4s ease-in-out infinite}.onboarding-nebula-ring-a,.onboarding-nebula-ring-b{position:absolute;border-radius:9999px;border:1px solid rgba(103,232,249,.1);pointer-events:none}.onboarding-nebula-ring-a{inset:-34px;animation:onboardingOrbit 18s linear infinite}.onboarding-nebula-ring-b{inset:-58px;border-color:rgba(255,255,255,.06);animation:onboardingOrbitReverse 26s linear infinite}@keyframes onboardingCoreFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}@keyframes onboardingCorePulse{0%,100%{transform:scale(.96)}50%{transform:scale(1.04)}}@keyframes onboardingOrbit{to{transform:rotate(360deg)}}@keyframes onboardingOrbitReverse{to{transform:rotate(-360deg)}}.onboarding-orion-soft-glow{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(96,165,250,.1),transparent 58%);filter:blur(35px);pointer-events:none}.onboarding-orion-device{position:relative;width:250px;height:410px;animation:onboardingDeviceFloat 6s ease-in-out infinite;filter:drop-shadow(20px 28px 38px rgba(15,23,42,.13))}.onboarding-device-side,.onboarding-device-right{position:absolute;z-index:1;background:#e2e8f0;border:1px solid rgba(255,255,255,.9);box-shadow:inset 2px 2px 4px rgba(255,255,255,.95),inset -2px -2px 4px rgba(15,23,42,.14)}.onboarding-device-side{left:-7px;width:7px;border-right:0;border-radius:6px 0 0 6px}.device-a{top:90px;height:24px}.device-b{top:132px;height:44px}.device-c{top:184px;height:44px}.onboarding-device-right{right:-7px;top:145px;width:7px;height:62px;border-left:0;border-radius:0 6px 6px 0}.onboarding-device-body{position:absolute;inset:0;border-radius:3.1rem;background:#e2e8f0;border:4px solid #f1f5f9;box-shadow:25px 35px 65px rgba(15,23,42,.15),inset -6px -6px 16px rgba(15,23,42,.08),inset 6px 6px 16px rgba(255,255,255,.95)}.onboarding-device-screen{position:absolute;inset:8px;overflow:hidden;border-radius:2.55rem;background:#f8f9fb;border:1px solid rgba(203,213,225,.7)}.onboarding-dynamic-island{position:absolute;top:9px;left:50%;z-index:20;width:92px;height:24px;transform:translateX(-50%);display:flex;align-items:center;justify-content:space-between;padding:0 8px;border-radius:999px;background:#0f172a}.onboarding-dynamic-island span{width:10px;height:10px;border-radius:50%;background:#1e293b}.onboarding-dynamic-island i{width:6px;height:6px;border-radius:50%;background:#10b981;box-shadow:0 0 5px rgba(16,185,129,.6);animation:orionPulse 2s infinite}.onboarding-statusbar{height:43px;padding:10px 16px 0;display:flex;align-items:center;justify-content:space-between;font-size:8px;font-weight:700;color:#0f172a}.onboarding-statusbar>div{display:flex;align-items:center;gap:4px}.onboarding-battery{width:14px;height:7px;border:1px solid #0f172a;border-radius:2px}.onboarding-device-content{height:calc(100% - 43px);padding:7px 11px 24px;overflow:hidden;background:linear-gradient(135deg,#f8f9fb,rgba(226,232,240,.3))}.onboarding-mini-card{position:relative;padding:10px;border:1px solid rgba(226,232,240,.9);border-radius:14px;background:rgba(255,255,255,.9);box-shadow:0 4px 12px rgba(15,23,42,.035),inset 0 1px 2px rgba(255,255,255,1)}.onboarding-mini-card>div:first-child>span,.onboarding-chart-card>div:first-child>span{font-size:6px;font-weight:700;letter-spacing:.15em;color:#94a3b8}.onboarding-mini-card strong{display:block;margin-top:3px;font-size:22px;color:#1e293b}.onboarding-mini-card small{font-size:9px;color:#94a3b8;margin-left:1px}.onboarding-ring{position:absolute;right:10px;top:9px;width:44px;height:44px;display:grid;place-items:center}.onboarding-ring svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}.onboarding-ring b{width:22px;height:22px;display:grid;place-items:center;border-radius:50%;background:#eff6ff;border:1px solid #dbeafe;color:#3b82f6}.onboarding-chart-card{height:96px;overflow:hidden}.onboarding-bars{height:60px;display:flex;align-items:flex-end;gap:2px;margin-top:6px}.onboarding-bars i{flex:1;border-radius:2px 2px 0 0;background:rgba(59,130,246,.22);animation:orionBars 2.6s infinite}.onboarding-bars i:nth-child(6){background:rgba(16,185,129,.6)}.onboarding-action-dot{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:#f5f3ff;color:#8b5cf6}.onboarding-mini-card>div:nth-child(2) strong{font-size:8px}.onboarding-mini-card>div:nth-child(2) span{margin-top:2px;font-size:7px;color:#8b5cf6;font-weight:600}.onboarding-toggle{width:27px;height:15px;border-radius:999px;background:#8b5cf6}.onboarding-toggle i{display:block;width:11px;height:11px;margin:2px 2px 0 auto;border-radius:50%;background:#fff}.onboarding-home-indicator{position:absolute;bottom:7px;left:50%;width:92px;height:3px;transform:translateX(-50%);border-radius:999px;background:rgba(15,23,42,.12)}@keyframes onboardingDeviceFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+.auth-status-pulse{animation:authStatusPulse 2.2s ease-in-out infinite}
+@keyframes authStatusPulse{0%,100%{box-shadow:0 0 0 0 rgba(52,211,153,.0)}50%{box-shadow:0 0 0 7px rgba(52,211,153,.05)}}
+@media(max-width:900px){.onboarding-orion-device{transform:scale(.85)}.onboarding-orion-device:hover{transform:scale(.87)}}
 `
