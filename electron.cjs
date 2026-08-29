@@ -10,22 +10,10 @@ const fs = require('fs')
 const { spawn } = require('child_process')
 const http = require('http')
 const { URL } = require('url')
-const { pathToFileURL } = require('url')
 const { autoUpdater } = require('electron-updater')
 
 const APP_ID = 'com.vidora.desktop'
 const APP_TITLE = 'VIDORA'
-const AUTH_PROTOCOL = 'vidora'
-const AUTH_CALLBACK_PREFIX = 'vidora://auth/callback'
-
-function getAuthCallbackFromArgv(argv = []) {
-  return argv.find((value) => (
-    typeof value === 'string' &&
-    value.toLowerCase().startsWith(AUTH_CALLBACK_PREFIX)
-  )) || null
-}
-
-let pendingAuthCallbackUrl = getAuthCallbackFromArgv(process.argv)
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -48,78 +36,62 @@ const isDev = !app.isPackaged
 let updaterInitialized = false
 let updateCheckInProgress = false
 let updateDownloaded = false
+let verifiedUpdateVersion = null
 
-function registerAuthProtocol() {
-  try {
-    if (process.defaultApp && process.argv.length >= 2) {
-      return app.setAsDefaultProtocolClient(
-        AUTH_PROTOCOL,
-        process.execPath,
-        [path.resolve(process.argv[1])],
-      )
+/* =========================================================
+   VERSION COMPARISON
+========================================================= */
+
+function normalizeVersion(value) {
+  const match = String(value || '')
+    .trim()
+    .replace(/^v/i, '')
+    .match(/^(\d+)\.(\d+)\.(\d+)/)
+
+  if (!match) {
+    return null
+  }
+
+  return [
+    Number(match[1]),
+    Number(match[2]),
+    Number(match[3]),
+  ]
+}
+
+function compareVersions(a, b) {
+  const av = normalizeVersion(a)
+  const bv = normalizeVersion(b)
+
+  if (!av || !bv) {
+    return null
+  }
+
+  for (let index = 0; index < 3; index += 1) {
+    if (av[index] > bv[index]) {
+      return 1
     }
 
-    return app.setAsDefaultProtocolClient(AUTH_PROTOCOL)
-  } catch (error) {
-    console.warn('[VIDORA] auth protocol registration failed:', error)
-    return false
+    if (av[index] < bv[index]) {
+      return -1
+    }
   }
+
+  return 0
 }
 
-function isValidAuthCallbackUrl(url) {
-  if (!url || typeof url !== 'string') {
-    return false
-  }
+function isNewerVersion(candidate, current) {
+  const comparison = compareVersions(candidate, current)
 
-  try {
-    const parsed = new URL(url)
-    return (
-      parsed.protocol === `${AUTH_PROTOCOL}:` &&
-      parsed.hostname === 'auth' &&
-      parsed.pathname === '/callback'
-    )
-  } catch {
-    return false
-  }
+  return comparison === 1
 }
-
-async function deliverAuthCallback(url) {
-  if (!isValidAuthCallbackUrl(url)) {
-    return
-  }
-
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingAuthCallbackUrl = url
-    return
-  }
-
-  const safeUrl = JSON.stringify(url)
-  const script = `(() => {
-    window.__VIDORA_AUTH_CALLBACK__ = ${safeUrl}
-    window.dispatchEvent(new CustomEvent('vidora-auth-callback', { detail: ${safeUrl} }))
-  })()`
-
-  try {
-    await mainWindow.webContents.executeJavaScript(script, true)
-  } catch (error) {
-    console.warn('[VIDORA] auth callback delivery failed:', error)
-    pendingAuthCallbackUrl = url
-  }
-}
-
-const initialAuthCallbackUrl = pendingAuthCallbackUrl
-pendingAuthCallbackUrl = initialAuthCallbackUrl
 
 /* =========================================================
    PATHS
 ========================================================= */
 
 function getFrontendPath() {
-  return path.join(
-    __dirname,
-    'dist',
-    'index.html',
-  )
+  return path.join(__dirname, 'dist', 'index.html')
 }
 
 function getBackendPath() {
@@ -146,34 +118,27 @@ function getIconPath() {
   )
 }
 
-function getRendererLogoPNG() {
-  const iconPath = getIconPath()
+/* =========================================================
+   BUNDLED RUNTIMES
+========================================================= */
 
-  if (!fs.existsSync(iconPath)) {
-    return null
+function getRuntimeRoot() {
+  if (isDev) {
+    return path.join(__dirname, 'runtime')
   }
 
-  try {
-    const image = nativeImage.createFromPath(iconPath)
-    if (image.isEmpty()) return null
-    return image.toPNG()
-  } catch (error) {
-    console.warn('[VIDORA] Renderer logo conversion failed:', error)
-    return null
-  }
+  return path.join(process.resourcesPath, 'runtime')
 }
 
-function getRendererIconURL() {
-  const iconPath = getIconPath()
+function getBundledRuntimePaths() {
+  const root = getRuntimeRoot()
 
-  if (!fs.existsSync(iconPath)) {
-    return ''
-  }
-
-  try {
-    return pathToFileURL(iconPath).href
-  } catch {
-    return ''
+  return {
+    nodeDir: path.join(root, 'node'),
+    ffmpegDir: path.join(root, 'ffmpeg', 'bin'),
+    nodeExe: path.join(root, 'node', 'node.exe'),
+    ffmpegExe: path.join(root, 'ffmpeg', 'bin', 'ffmpeg.exe'),
+    ffprobeExe: path.join(root, 'ffmpeg', 'bin', 'ffprobe.exe'),
   }
 }
 
@@ -189,11 +154,39 @@ function startBackend() {
   const backendPath = getBackendPath()
 
   if (!fs.existsSync(backendPath)) {
-    console.error('[VIDORA] backend not found:', backendPath)
+    console.error(
+      '[VIDORA] backend not found:',
+      backendPath,
+    )
+
     return
   }
 
-  console.log('[VIDORA] starting backend:', backendPath)
+  console.log(
+    '[VIDORA] starting backend:',
+    backendPath,
+  )
+
+  const runtime = getBundledRuntimePaths()
+
+  const runtimeDirs = [
+    runtime.nodeDir,
+    runtime.ffmpegDir,
+  ].filter((directory) => fs.existsSync(directory))
+
+  const env = {
+    ...process.env,
+    PATH: [
+      runtimeDirs.join(path.delimiter),
+      process.env.PATH || '',
+    ].filter(Boolean).join(path.delimiter),
+  }
+
+  console.log('[VIDORA] bundled runtime status:', {
+    node: fs.existsSync(runtime.nodeExe),
+    ffmpeg: fs.existsSync(runtime.ffmpegExe),
+    ffprobe: fs.existsSync(runtime.ffprobeExe),
+  })
 
   backendProcess = spawn(
     backendPath,
@@ -202,18 +195,34 @@ function startBackend() {
       windowsHide: true,
       detached: false,
       stdio: 'ignore',
+      cwd: path.dirname(backendPath),
+      env,
     },
   )
 
-  backendProcess.on('error', (error) => {
-    console.error('[VIDORA] backend error:', error)
-    backendProcess = null
-  })
+  backendProcess.on(
+    'error',
+    (error) => {
+      console.error(
+        '[VIDORA] backend error:',
+        error,
+      )
 
-  backendProcess.on('exit', (code) => {
-    console.log('[VIDORA] backend exited:', code)
-    backendProcess = null
-  })
+      backendProcess = null
+    },
+  )
+
+  backendProcess.on(
+    'exit',
+    (code, signal) => {
+      console.log(
+        '[VIDORA] backend exited:',
+        { code, signal },
+      )
+
+      backendProcess = null
+    },
+  )
 }
 
 function stopBackend() {
@@ -230,139 +239,296 @@ function stopBackend() {
   backendProcess = null
 }
 
+async function waitForBackend(timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    try {
+      await new Promise(
+        (resolve, reject) => {
+          const request = http.get(
+            'http://127.0.0.1:8000/health',
+            {
+              timeout: 1200,
+              headers: {
+                'Cache-Control':
+                  'no-cache',
+              },
+            },
+            (response) => {
+              response.resume()
+
+              if (
+                response.statusCode === 200
+              ) {
+                resolve()
+              } else {
+                reject(
+                  new Error(
+                    `Backend health returned ${response.statusCode}`,
+                  ),
+                )
+              }
+            },
+          )
+
+          request.on(
+            'error',
+            reject,
+          )
+
+          request.on(
+            'timeout',
+            () => {
+              request.destroy(
+                new Error(
+                  'Backend health check timed out.',
+                ),
+              )
+            },
+          )
+        },
+      )
+
+      console.log(
+        '[VIDORA] backend is ready',
+      )
+
+      return true
+    } catch {
+      await new Promise(
+        (resolve) =>
+          setTimeout(resolve, 350),
+      )
+    }
+  }
+
+  return false
+}
+
 /* =========================================================
    LOCAL FRONTEND SERVER
 ========================================================= */
 
 function getMimeType(filePath) {
-  const ext = path.extname(filePath).toLowerCase()
+  const ext = path
+    .extname(filePath)
+    .toLowerCase()
+
   const map = {
-    '.html': 'text/html; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8',
-    '.css': 'text/css; charset=utf-8',
-    '.json': 'application/json; charset=utf-8',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon',
-    '.webp': 'image/webp',
-    '.woff': 'font/woff',
-    '.woff2': 'font/woff2',
-    '.ttf': 'font/ttf',
+    '.html':
+      'text/html; charset=utf-8',
+    '.js':
+      'text/javascript; charset=utf-8',
+    '.css':
+      'text/css; charset=utf-8',
+    '.json':
+      'application/json',
+    '.png':
+      'image/png',
+    '.jpg':
+      'image/jpeg',
+    '.jpeg':
+      'image/jpeg',
+    '.gif':
+      'image/gif',
+    '.svg':
+      'image/svg+xml',
+    '.ico':
+      'image/x-icon',
+    '.webp':
+      'image/webp',
+    '.woff':
+      'font/woff',
+    '.woff2':
+      'font/woff2',
+    '.ttf':
+      'font/ttf',
   }
-  return map[ext] || 'application/octet-stream'
+
+  return (
+    map[ext] ||
+    'application/octet-stream'
+  )
 }
 
 async function startFrontendServer() {
-  if (frontendServer && frontendOrigin) {
+  if (
+    frontendServer &&
+    frontendOrigin
+  ) {
     return frontendOrigin
   }
 
-  const distRoot = path.join(__dirname, 'dist')
-  const indexPath = path.join(distRoot, 'index.html')
+  const distRoot = path.join(
+    __dirname,
+    'dist',
+  )
+
+  const indexPath = path.join(
+    distRoot,
+    'index.html',
+  )
 
   if (!fs.existsSync(indexPath)) {
-    throw new Error(`Frontend not found: ${indexPath}`)
+    throw new Error(
+      `Frontend not found: ${indexPath}`,
+    )
   }
 
-  frontendServer = http.createServer((request, response) => {
-    try {
-      const pathname = decodeURIComponent(
-        new URL(request.url || '/', 'http://127.0.0.1').pathname,
-      )
+  frontendServer =
+    http.createServer(
+      (
+        request,
+        response,
+      ) => {
+        try {
+          const pathname =
+            decodeURIComponent(
+              new URL(
+                request.url ||
+                  '/',
+                'http://127.0.0.1',
+              ).pathname,
+            )
 
-      const relativePath =
-        pathname === '/'
-          ? 'index.html'
-          : pathname.replace(/^\/+/, '')
+          const relativePath =
+            pathname === '/'
+              ? 'index.html'
+              : pathname.replace(
+                  /^\/+/,
+                  '',
+                )
 
-      // Keep the renderer's existing /vidora-sidebar-logo.png URL working even
-      // when the PNG asset is not present in dist. Serve the packaged VIDORA ICO
-      // at that URL; Chromium can render ICO files in an <img> element.
-      const requestedLogo = pathname === '/vidora-sidebar-logo.png'
+          const resolvedRoot =
+            path.resolve(
+              distRoot,
+            )
 
-      if (requestedLogo) {
-        const logoPNG = getRendererLogoPNG()
+          let resolvedPath =
+            path.resolve(
+              resolvedRoot,
+              relativePath,
+            )
 
-        if (!logoPNG) {
-          response.writeHead(404)
-          response.end('Logo not found')
-          return
+          if (
+            resolvedPath !==
+              resolvedRoot &&
+            !resolvedPath.startsWith(
+              `${resolvedRoot}${path.sep}`,
+            )
+          ) {
+            response.writeHead(403)
+            response.end(
+              'Forbidden',
+            )
+
+            return
+          }
+
+          if (
+            !fs.existsSync(
+              resolvedPath,
+            ) ||
+            fs.statSync(
+              resolvedPath,
+            ).isDirectory()
+          ) {
+            resolvedPath =
+              indexPath
+          }
+
+          response.writeHead(
+            200,
+            {
+              'Content-Type':
+                getMimeType(
+                  resolvedPath,
+                ),
+
+              'Cache-Control':
+                pathname === '/' ||
+                pathname.endsWith(
+                  '/index.html',
+                )
+                  ? 'no-store'
+                  : 'public, max-age=31536000, immutable',
+            },
+          )
+
+          fs.createReadStream(
+            resolvedPath,
+          ).pipe(response)
+        } catch (error) {
+          console.error(
+            '[VIDORA] frontend server error:',
+            error,
+          )
+
+          response.writeHead(
+            500,
+          )
+
+          response.end(
+            'Internal Server Error',
+          )
+        }
+      },
+    )
+
+  await new Promise(
+    (resolve, reject) => {
+      const onError =
+        (error) => {
+          frontendServer?.removeListener(
+            'listening',
+            onListening,
+          )
+
+          reject(error)
         }
 
-        response.writeHead(200, {
-          'Content-Type': 'image/png',
-          'Cache-Control': 'no-store',
-          'Content-Length': logoPNG.length,
-        })
-        response.end(logoPNG)
-        return
-      }
+      const onListening =
+        () => {
+          frontendServer?.removeListener(
+            'error',
+            onError,
+          )
 
-      const resolvedRoot = path.resolve(distRoot)
-      let resolvedPath = path.resolve(resolvedRoot, relativePath)
+          resolve()
+        }
 
-      if (
-        resolvedPath !== resolvedRoot &&
-        !resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)
-      ) {
-        response.writeHead(403)
-        response.end('Forbidden')
-        return
-      }
-
-      if (
-        !fs.existsSync(resolvedPath) ||
-        fs.statSync(resolvedPath).isDirectory()
-      ) {
-        resolvedPath = indexPath
-      }
-
-      response.writeHead(200, {
-        'Content-Type': getMimeType(resolvedPath),
-        'Cache-Control':
-          pathname === '/' || pathname.endsWith('/index.html')
-            ? 'no-store'
-            : 'public, max-age=31536000, immutable',
-      })
-
-      fs.createReadStream(resolvedPath).pipe(response)
-    } catch (error) {
-      console.error(
-        '[VIDORA] frontend server error:',
-        error,
+      frontendServer.once(
+        'error',
+        onError,
       )
 
-      response.writeHead(500)
-      response.end('Internal Server Error')
-    }
-  })
+      frontendServer.once(
+        'listening',
+        onListening,
+      )
 
-  await new Promise((resolve, reject) => {
-    const onError = (error) => {
-      frontendServer?.removeListener('listening', onListening)
-      reject(error)
-    }
+      frontendServer.listen(
+        5173,
+        '127.0.0.1',
+      )
+    },
+  )
 
-    const onListening = () => {
-      frontendServer?.removeListener('error', onError)
-      resolve()
-    }
+  const address =
+    frontendServer.address()
 
-    frontendServer.once('error', onError)
-    frontendServer.once('listening', onListening)
-    frontendServer.listen(5173, '127.0.0.1')
-  })
-
-  const address = frontendServer.address()
-
-  if (!address || typeof address === 'string') {
-    throw new Error('Could not determine frontend server address.')
+  if (
+    !address ||
+    typeof address === 'string'
+  ) {
+    throw new Error(
+      'Could not determine frontend server address.',
+    )
   }
 
-  frontendOrigin = `http://127.0.0.1:${address.port}`
+  frontendOrigin =
+    `http://127.0.0.1:${address.port}`
 
   console.log(
     '[VIDORA] frontend server:',
@@ -391,14 +557,19 @@ function stopFrontendServer() {
    SECURITY
 ========================================================= */
 
-function isMainWindowContents(contents) {
-  return (
+function isMainWindowContents(
+  contents,
+) {
+  return Boolean(
     mainWindow &&
-    contents === mainWindow.webContents
+      contents ===
+        mainWindow.webContents,
   )
 }
 
-function isAllowedNavigation(url) {
+function isAllowedNavigation(
+  url,
+) {
   if (!url) {
     return false
   }
@@ -406,10 +577,14 @@ function isAllowedNavigation(url) {
   try {
     const parsed = new URL(url)
 
-    if (parsed.protocol === 'http:') {
+    if (
+      parsed.protocol ===
+      'http:'
+    ) {
       if (
         frontendOrigin &&
-        parsed.origin === frontendOrigin
+        parsed.origin ===
+          frontendOrigin
       ) {
         return true
       }
@@ -417,21 +592,28 @@ function isAllowedNavigation(url) {
       if (
         isDev &&
         (
-          parsed.hostname === 'localhost' ||
-          parsed.hostname === '127.0.0.1'
+          parsed.hostname ===
+            'localhost' ||
+          parsed.hostname ===
+            '127.0.0.1'
         )
       ) {
         return true
       }
     }
 
-    if (parsed.protocol === 'file:') {
-      const frontendURL = new URL(
-        `file://${getFrontendPath().replace(/\\/g, '/')}`,
-      )
+    if (
+      parsed.protocol ===
+      'file:'
+    ) {
+      const frontendURL =
+        new URL(
+          `file://${getFrontendPath().replace(/\\/g, '/')}`,
+        )
 
       return (
-        parsed.pathname === frontendURL.pathname
+        parsed.pathname ===
+        frontendURL.pathname
       )
     }
 
@@ -441,24 +623,28 @@ function isAllowedNavigation(url) {
   }
 }
 
-
 /* =========================================================
    UPDATE IPC STATE
 ========================================================= */
 
-function sendUpdateEvent(event, payload = {}) {
-  if (!mainWindow) {
+function sendUpdateEvent(
+  event,
+  payload = {},
+) {
+  if (
+    !mainWindow ||
+    mainWindow.webContents.isDestroyed()
+  ) {
     return
   }
 
-  if (mainWindow.webContents.isDestroyed()) {
-    return
-  }
-
-  mainWindow.webContents.send('updater:event', {
-    event,
-    ...payload,
-  })
+  mainWindow.webContents.send(
+    'updater:event',
+    {
+      event,
+      ...payload,
+    },
+  )
 }
 
 /* =========================================================
@@ -466,153 +652,431 @@ function sendUpdateEvent(event, payload = {}) {
 ========================================================= */
 
 function initializeAutoUpdater() {
-  if (updaterInitialized || isDev) {
+  if (
+    updaterInitialized ||
+    isDev
+  ) {
     return
   }
 
   updaterInitialized = true
 
-  autoUpdater.autoDownload = true
+  /*
+   * IMPORTANT:
+   * Never allow electron-updater to
+   * automatically download simply
+   * because it emitted update-available.
+   */
+  autoUpdater.autoDownload = false
+  // VIDORA uses GitHub pre-releases for its current test/update channel.
+  // A stable-looking app version (e.g. 1.1.1) otherwise ignores pre-release updates.
+  autoUpdater.allowPrerelease = false
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.disableDifferentialDownload = false
   autoUpdater.disableWebInstaller = true
 
-  autoUpdater.on('checking-for-update', () => {
-    updateCheckInProgress = true
-    sendUpdateEvent('checking-for-update')
-  })
+  autoUpdater.on(
+    'checking-for-update',
+    () => {
+      updateCheckInProgress = true
 
-  autoUpdater.on('update-available', (info) => {
-    updateCheckInProgress = true
-    sendUpdateEvent('update-available', {
-      version: info?.version || null,
-    })
-  })
+      sendUpdateEvent(
+        'checking-for-update',
+      )
+    },
+  )
 
-  autoUpdater.on('update-not-available', (info) => {
-    updateCheckInProgress = false
-    updateDownloaded = false
+  autoUpdater.on(
+    'update-available',
+    (info) => {
+      const availableVersion =
+        info?.version || ''
 
-    sendUpdateEvent('update-not-available', {
-      version: info?.version || null,
-      currentVersion: app.getVersion(),
-    })
-  })
+      const currentVersion =
+        app.getVersion()
 
-  autoUpdater.on('download-progress', (progress) => {
-    sendUpdateEvent('download-progress', {
-      percent: Number.isFinite(progress?.percent)
-        ? progress.percent
-        : 0,
-      bytesPerSecond: progress?.bytesPerSecond || 0,
-      total: progress?.total || 0,
-      transferred: progress?.transferred || 0,
-    })
-  })
+      /*
+       * Never treat the same or an older
+       * version as a real update.
+       */
+      if (
+        !isNewerVersion(
+          availableVersion,
+          currentVersion,
+        )
+      ) {
+        console.log(
+          '[VIDORA] ignoring non-newer update:',
+          {
+            currentVersion,
+            availableVersion,
+          },
+        )
 
-  autoUpdater.on('update-downloaded', (info) => {
-    updateCheckInProgress = false
-    updateDownloaded = true
+        updateCheckInProgress =
+          false
 
-    sendUpdateEvent('update-downloaded', {
-      version: info?.version || null,
-    })
-  })
+        verifiedUpdateVersion =
+          null
 
-  autoUpdater.on('update-cancelled', (info) => {
-    updateCheckInProgress = false
-    updateDownloaded = false
+        sendUpdateEvent(
+          'update-not-available',
+          {
+            version:
+              currentVersion,
+            currentVersion,
+          },
+        )
 
-    sendUpdateEvent('update-cancelled', {
-      version: info?.version || null,
-    })
-  })
+        return
+      }
 
-  autoUpdater.on('error', (error) => {
-    updateCheckInProgress = false
-    console.error('[VIDORA] updater error:', error)
+      verifiedUpdateVersion =
+        availableVersion
 
-    sendUpdateEvent('error', {
-      message: error?.message || 'Update failed.',
-    })
-  })
+      updateCheckInProgress = true
 
-  console.log('[VIDORA] auto updater initialized')
+      sendUpdateEvent(
+        'update-available',
+        {
+          version:
+            availableVersion,
+          currentVersion,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'update-not-available',
+    (info) => {
+      updateCheckInProgress = false
+      updateDownloaded = false
+      verifiedUpdateVersion = null
+
+      sendUpdateEvent(
+        'update-not-available',
+        {
+          version:
+            info?.version ||
+            app.getVersion(),
+
+          currentVersion:
+            app.getVersion(),
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'download-progress',
+    (progress) => {
+      sendUpdateEvent(
+        'download-progress',
+        {
+          percent:
+            Number.isFinite(
+              progress?.percent,
+            )
+              ? progress.percent
+              : 0,
+
+          bytesPerSecond:
+            progress?.bytesPerSecond ||
+            0,
+
+          total:
+            progress?.total || 0,
+
+          transferred:
+            progress?.transferred ||
+            0,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'update-downloaded',
+    (info) => {
+      updateCheckInProgress =
+        false
+
+      updateDownloaded = true
+
+      sendUpdateEvent(
+        'update-downloaded',
+        {
+          version:
+            info?.version ||
+            verifiedUpdateVersion ||
+            null,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'update-cancelled',
+    (info) => {
+      updateCheckInProgress =
+        false
+
+      updateDownloaded = false
+      verifiedUpdateVersion = null
+
+      sendUpdateEvent(
+        'update-cancelled',
+        {
+          version:
+            info?.version ||
+            null,
+        },
+      )
+    },
+  )
+
+  autoUpdater.on(
+    'error',
+    (error) => {
+      updateCheckInProgress =
+        false
+
+      updateDownloaded = false
+      verifiedUpdateVersion = null
+
+      console.error(
+        '[VIDORA] updater error:',
+        error,
+      )
+
+      sendUpdateEvent(
+        'error',
+        {
+          message:
+            error?.message ||
+            'Update failed.',
+        },
+      )
+    },
+  )
+
+  console.log(
+    '[VIDORA] auto updater initialized',
+  )
 }
 
 /* =========================================================
    UPDATE IPC HANDLERS
 ========================================================= */
 
-ipcMain.handle('updater:check', async () => {
-  if (isDev) {
-    return {
-      status: 'disabled-in-development',
-      version: app.getVersion(),
-    }
-  }
-
-  if (updateCheckInProgress) {
-    return {
-      status: 'checking',
-      version: app.getVersion(),
-    }
-  }
-
-  try {
-    const result = await autoUpdater.checkForUpdates()
-
-    if (!result) {
+ipcMain.handle(
+  'updater:check',
+  async () => {
+    if (isDev) {
       return {
-        status: 'unavailable',
-        version: app.getVersion(),
+        status:
+          'disabled-in-development',
+
+        version:
+          app.getVersion(),
       }
     }
 
-    const available = Boolean(
-      result.updateInfo &&
-      result.updateInfo.version &&
-      result.updateInfo.version !== app.getVersion(),
-    )
+    if (
+      updateCheckInProgress
+    ) {
+      return {
+        status: 'checking',
 
-    return {
-      status: available ? 'available' : 'current',
-      currentVersion: app.getVersion(),
-      availableVersion: result?.updateInfo?.version || null,
+        version:
+          app.getVersion(),
+      }
     }
-  } catch (error) {
-    console.error('[VIDORA] update check failed:', error)
 
-    return {
-      status: 'error',
-      message: error?.message || 'Could not check for updates.',
+    try {
+      verifiedUpdateVersion =
+        null
+
+      const result =
+        await autoUpdater.checkForUpdates()
+
+      if (!result) {
+        updateCheckInProgress =
+          false
+
+        return {
+          status:
+            'unavailable',
+
+          version:
+            app.getVersion(),
+        }
+      }
+
+      const currentVersion =
+        app.getVersion()
+
+      const availableVersion =
+        result?.updateInfo?.version ||
+        null
+
+      if (
+        !availableVersion
+      ) {
+        updateCheckInProgress =
+          false
+
+        return {
+          status:
+            'current',
+
+          currentVersion,
+        }
+      }
+
+      /*
+       * THE IMPORTANT FIX:
+       * Only a strictly newer version
+       * is allowed to download.
+       */
+      if (
+        !isNewerVersion(
+          availableVersion,
+          currentVersion,
+        )
+      ) {
+        console.log(
+          '[VIDORA] no newer version:',
+          {
+            currentVersion,
+            availableVersion,
+          },
+        )
+
+        updateCheckInProgress =
+          false
+
+        verifiedUpdateVersion =
+          null
+
+        return {
+          status: 'current',
+
+          currentVersion,
+
+          availableVersion,
+        }
+      }
+
+      /*
+       * We have verified that this
+       * version is actually newer.
+       */
+      verifiedUpdateVersion =
+        availableVersion
+
+      try {
+        await autoUpdater.downloadUpdate()
+
+        return {
+          status: 'available',
+
+          currentVersion,
+
+          availableVersion,
+        }
+      } catch (downloadError) {
+        updateCheckInProgress =
+          false
+
+        verifiedUpdateVersion =
+          null
+
+        console.error(
+          '[VIDORA] update download start failed:',
+          downloadError,
+        )
+
+        return {
+          status: 'error',
+
+          message:
+            downloadError?.message ||
+            'Could not download the update.',
+        }
+      }
+    } catch (error) {
+      updateCheckInProgress =
+        false
+
+      verifiedUpdateVersion =
+        null
+
+      console.error(
+        '[VIDORA] update check failed:',
+        error,
+      )
+
+      return {
+        status: 'error',
+
+        message:
+          error?.message ||
+          'Could not check for updates.',
+      }
     }
-  }
-})
+  },
+)
 
-ipcMain.handle('updater:install', async () => {
-  if (isDev) {
-    return { status: 'disabled-in-development' }
-  }
-
-  if (!updateDownloaded) {
-    return { status: 'not-downloaded' }
-  }
-
-  try {
-    autoUpdater.quitAndInstall(true, true)
-    return { status: 'installing' }
-  } catch (error) {
-    console.error('[VIDORA] update install failed:', error)
-
-    return {
-      status: 'error',
-      message: error?.message || 'Could not install the update.',
+ipcMain.handle(
+  'updater:install',
+  async () => {
+    if (isDev) {
+      return {
+        status:
+          'disabled-in-development',
+      }
     }
-  }
-})
 
-ipcMain.handle('app:get-version', () => app.getVersion())
+    if (!updateDownloaded) {
+      return {
+        status:
+          'not-downloaded',
+      }
+    }
+
+    try {
+      autoUpdater.quitAndInstall(
+        true,
+        true,
+      )
+
+      return {
+        status:
+          'installing',
+      }
+    } catch (error) {
+      console.error(
+        '[VIDORA] update install failed:',
+        error,
+      )
+
+      return {
+        status: 'error',
+
+        message:
+          error?.message ||
+          'Could not install the update.',
+      }
+    }
+  },
+)
+
+ipcMain.handle(
+  'app:get-version',
+  () => app.getVersion(),
+)
 
 /* =========================================================
    WINDOW
@@ -620,183 +1084,191 @@ ipcMain.handle('app:get-version', () => app.getVersion())
 
 async function createWindow() {
   if (mainWindow) {
-    if (mainWindow.isMinimized()) {
+    if (
+      mainWindow.isMinimized()
+    ) {
       mainWindow.restore()
     }
 
     mainWindow.show()
     mainWindow.focus()
 
-    if (pendingAuthCallbackUrl) {
-      const callback = pendingAuthCallbackUrl
-      pendingAuthCallbackUrl = null
-      deliverAuthCallback(callback)
-    }
-
     return
   }
 
-  const iconPath = getIconPath()
+  const iconPath =
+    getIconPath()
 
-  console.log('[VIDORA] icon:', iconPath)
+  mainWindow =
+    new BrowserWindow({
+      width: 1400,
+      height: 900,
 
-  if (!fs.existsSync(iconPath)) {
-    console.warn('[VIDORA] icon not found:', iconPath)
-  }
+      minWidth: 1050,
+      minHeight: 700,
 
-  mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1050,
-    minHeight: 700,
-    title: APP_TITLE,
-    icon: iconPath,
-    backgroundColor: '#05070a',
-    frame: true,
-    resizable: true,
-    minimizable: true,
-    maximizable: true,
-    closable: true,
-    autoHideMenuBar: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-      devTools: isDev,
-    },
-  })
+      title: APP_TITLE,
 
-  if (process.platform === 'win32' && fs.existsSync(iconPath)) {
+      icon: iconPath,
+
+      backgroundColor:
+        '#05070a',
+
+      frame: true,
+
+      resizable: true,
+      minimizable: true,
+      maximizable: true,
+      closable: true,
+
+      autoHideMenuBar: true,
+
+      webPreferences: {
+        preload: path.join(
+          __dirname,
+          'preload.cjs',
+        ),
+
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+
+        webSecurity: true,
+
+        allowRunningInsecureContent:
+          false,
+
+        devTools: isDev,
+      },
+    })
+
+  if (
+    process.platform ===
+      'win32' &&
+    fs.existsSync(iconPath)
+  ) {
     try {
-      mainWindow.setIcon(iconPath)
+      mainWindow.setIcon(
+        iconPath,
+      )
     } catch (error) {
-      console.warn('[VIDORA] setIcon failed:', error)
+      console.warn(
+        '[VIDORA] setIcon failed:',
+        error,
+      )
     }
   }
 
-  mainWindow.setMenuBarVisibility(false)
+  mainWindow.setMenuBarVisibility(
+    false,
+  )
 
-  mainWindow.webContents.on('page-title-updated', (event) => {
-    event.preventDefault()
-
-    if (mainWindow) {
-      mainWindow.setTitle(APP_TITLE)
-    }
-  })
-
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (!isAllowedNavigation(url)) {
+  mainWindow.webContents.on(
+    'page-title-updated',
+    (event) => {
       event.preventDefault()
-      console.warn('[VIDORA] blocked navigation:', url)
-    }
-  })
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    try {
-      const parsed = new URL(url)
+      mainWindow?.setTitle(
+        APP_TITLE,
+      )
+    },
+  )
 
-      const allowedAuthPopup =
-        parsed.protocol === 'https:' &&
-        (
-          parsed.hostname === 'accounts.google.com' ||
-          parsed.hostname.endsWith('.google.com') ||
-          parsed.hostname.endsWith('.googleusercontent.com') ||
-          parsed.hostname === 'firebaseapp.com' ||
-          parsed.hostname.endsWith('.firebaseapp.com')
+  mainWindow.webContents.on(
+    'will-navigate',
+    (event, url) => {
+      if (
+        !isAllowedNavigation(
+          url,
         )
+      ) {
+        event.preventDefault()
 
-      if (allowedAuthPopup) {
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            icon: iconPath,
-            title: 'VIDORA — Google Sign-In',
-            autoHideMenuBar: true,
-            backgroundColor: '#05070a',
-            resizable: true,
-            minimizable: true,
-            maximizable: true,
-            closable: true,
-          },
-        }
+        console.warn(
+          '[VIDORA] blocked navigation:',
+          url,
+        )
       }
-    } catch {
-      // Fall through to deny.
-    }
+    },
+  )
 
-    console.warn('[VIDORA] blocked new window:', url)
-    return { action: 'deny' }
-  })
+  mainWindow.webContents.setWindowOpenHandler(
+    ({ url }) => {
+      console.warn(
+        '[VIDORA] blocked new window:',
+        url,
+      )
 
-  mainWindow.webContents.on('will-redirect', (event, url) => {
-    if (!isAllowedNavigation(url)) {
-      event.preventDefault()
-      console.warn('[VIDORA] blocked redirect:', url)
-    }
-  })
+      return {
+        action: 'deny',
+      }
+    },
+  )
+
+  mainWindow.webContents.on(
+    'will-redirect',
+    (event, url) => {
+      if (
+        !isAllowedNavigation(
+          url,
+        )
+      ) {
+        event.preventDefault()
+
+        console.warn(
+          '[VIDORA] blocked redirect:',
+          url,
+        )
+      }
+    },
+  )
 
   if (!isDev) {
-    mainWindow.webContents.on('devtools-opened', () => {
-      mainWindow?.webContents.closeDevTools()
-    })
+    mainWindow.webContents.on(
+      'devtools-opened',
+      () => {
+        mainWindow?.webContents.closeDevTools()
+      },
+    )
   }
 
-  let frontendURL
+  const frontendURL =
+    await startFrontendServer()
 
-  try {
-    frontendURL = await startFrontendServer()
-  } catch (error) {
-    console.error(
-      '[VIDORA] frontend server failed:',
-      error,
-    )
+  mainWindow.loadURL(
+    `${frontendURL}/`,
+  )
 
-    dialog.showErrorBox(
-      APP_TITLE,
-      error?.message ||
-        'VIDORA could not start its local frontend.',
-    )
-
-    app.quit()
-    return
-  }
-
-  console.log('[VIDORA] loading:', frontendURL)
-
-  mainWindow.loadURL(`${frontendURL}/`)
-
-  mainWindow.webContents.on('did-finish-load', async () => {
-    if (!mainWindow) {
-      return
-    }
-
-    mainWindow.setTitle(APP_TITLE)
-
-    if (process.platform === 'win32' && fs.existsSync(iconPath)) {
-      try {
-        mainWindow.setIcon(iconPath)
-      } catch {
-        // Ignore refresh errors.
+  mainWindow.webContents.on(
+    'did-finish-load',
+    () => {
+      if (!mainWindow) {
+        return
       }
-    }
 
-    if (pendingAuthCallbackUrl) {
-      const callback = pendingAuthCallbackUrl
-      pendingAuthCallbackUrl = null
-      setTimeout(() => {
-        deliverAuthCallback(callback)
-      }, 150)
-    }
+      mainWindow.setTitle(
+        APP_TITLE,
+      )
 
-    console.log('[VIDORA] renderer loaded')
-  })
+      /*
+       * IMPORTANT:
+       * No renderer logo replacement.
+       * React owns the colorful VIDORA logo.
+       */
+      console.log(
+        '[VIDORA] renderer loaded',
+      )
+    },
+  )
 
   mainWindow.webContents.on(
     'did-fail-load',
-    (event, errorCode, errorDescription, validatedURL) => {
+    (
+      event,
+      errorCode,
+      errorDescription,
+      validatedURL,
+    ) => {
       console.error(
         '[VIDORA] renderer failed:',
         errorCode,
@@ -806,118 +1278,211 @@ async function createWindow() {
     },
   )
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
-  })
+  mainWindow.on(
+    'closed',
+    () => {
+      mainWindow = null
+    },
+  )
 }
 
 /* =========================================================
    FOLDER PICKER
 ========================================================= */
 
-ipcMain.handle('dialog:choose-folder', async () => {
-  if (!mainWindow) {
-    return null
-  }
-
-  try {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Choose VIDORA download folder',
-      defaultPath: app.getPath('downloads'),
-      properties: ['openDirectory', 'createDirectory'],
-    })
-
-    console.log('[VIDORA] folder picker result:', result)
-
-    if (
-      result.canceled ||
-      !result.filePaths ||
-      result.filePaths.length === 0
-    ) {
+ipcMain.handle(
+  'dialog:choose-folder',
+  async () => {
+    if (!mainWindow) {
       return null
     }
 
-    return result.filePaths[0]
-  } catch (error) {
-    console.error('[VIDORA] folder picker error:', error)
-    return null
-  }
-})
+    try {
+      const result =
+        await dialog.showOpenDialog(
+          mainWindow,
+          {
+            title:
+              'Choose VIDORA download folder',
+
+            defaultPath:
+              app.getPath(
+                'downloads',
+              ),
+
+            properties: [
+              'openDirectory',
+              'createDirectory',
+            ],
+          },
+        )
+
+      if (
+        result.canceled ||
+        !result.filePaths ||
+        result.filePaths.length === 0
+      ) {
+        return null
+      }
+
+      return result.filePaths[0]
+    } catch (error) {
+      console.error(
+        '[VIDORA] folder picker error:',
+        error,
+      )
+
+      return null
+    }
+  },
+)
 
 /* =========================================================
    SINGLE INSTANCE
 ========================================================= */
 
-app.on('second-instance', (event, commandLine) => {
-  const callbackUrl = getAuthCallbackFromArgv(commandLine)
+app.on(
+  'second-instance',
+  () => {
+    if (!mainWindow) {
+      createWindow().catch(
+        (error) => {
+          console.error(
+            '[VIDORA] window creation failed:',
+            error,
+          )
+        },
+      )
 
-  if (callbackUrl) {
-    pendingAuthCallbackUrl = callbackUrl
-  }
+      return
+    }
 
-  if (!mainWindow) {
-    createWindow()
-    return
-  }
+    if (
+      mainWindow.isMinimized()
+    ) {
+      mainWindow.restore()
+    }
 
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore()
-  }
-
-  mainWindow.show()
-  mainWindow.focus()
-
-  if (callbackUrl) {
-    deliverAuthCallback(callbackUrl)
-  }
-})
+    mainWindow.show()
+    mainWindow.focus()
+  },
+)
 
 /* =========================================================
    APP START
 ========================================================= */
 
-app.whenReady().then(() => {
-  if (process.platform === 'win32') {
-    app.setAppUserModelId(APP_ID)
-  }
-
-  registerAuthProtocol()
-
-  app.on('web-contents-created', (event, contents) => {
-    contents.on('will-navigate', (navigationEvent, url) => {
-      if (
-        isMainWindowContents(contents) &&
-        !isAllowedNavigation(url)
-      ) {
-        navigationEvent.preventDefault()
-      }
-    })
-  })
-
-  startBackend()
-  createWindow().catch((error) => {
-    console.error('[VIDORA] window creation failed:', error)
-    app.quit()
-  })
-
-  initializeAutoUpdater()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+app.whenReady().then(
+  async () => {
+    if (
+      process.platform ===
+      'win32'
+    ) {
+      app.setAppUserModelId(
+        APP_ID,
+      )
     }
-  })
-})
+
+    app.on(
+      'web-contents-created',
+      (event, contents) => {
+        contents.on(
+          'will-navigate',
+          (
+            navigationEvent,
+            url,
+          ) => {
+            if (
+              isMainWindowContents(
+                contents,
+              ) &&
+              !isAllowedNavigation(
+                url,
+              )
+            ) {
+              navigationEvent.preventDefault()
+            }
+          },
+        )
+      },
+    )
+
+    startBackend()
+
+    const backendReady =
+      await waitForBackend()
+
+    if (!backendReady) {
+      dialog.showErrorBox(
+        APP_TITLE,
+        'VIDORA could not start its local download engine. Please restart VIDORA and try again.',
+      )
+
+      app.quit()
+
+      return
+    }
+
+    try {
+      await createWindow()
+    } catch (error) {
+      console.error(
+        '[VIDORA] window creation failed:',
+        error,
+      )
+
+      dialog.showErrorBox(
+        APP_TITLE,
+        error?.message ||
+          'VIDORA could not start.',
+      )
+
+      app.quit()
+
+      return
+    }
+
+    initializeAutoUpdater()
+
+    app.on(
+      'activate',
+      () => {
+        if (
+          BrowserWindow.getAllWindows()
+            .length === 0
+        ) {
+          createWindow().catch(
+            (error) => {
+              console.error(
+                '[VIDORA] window creation failed:',
+                error,
+              )
+            },
+          )
+        }
+      },
+    )
+  },
+)
 
 /* =========================================================
    SHUTDOWN
 ========================================================= */
 
-app.on('before-quit', () => {
-  stopBackend()
-})
+app.on(
+  'before-quit',
+  () => {
+    stopFrontendServer()
+    stopBackend()
+  },
+)
 
-app.on('window-all-closed', () => {
-  stopBackend()
-  app.quit()
-})
+app.on(
+  'window-all-closed',
+  () => {
+    stopFrontendServer()
+    stopBackend()
+
+    app.quit()
+  },
+)

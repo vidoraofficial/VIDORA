@@ -1,73 +1,80 @@
 {
-  "name": "vidora-desktop",
-  "version": "1.0.0-beta.1",
-  "description": "VIDORA desktop media downloader",
-  "private": true,
-  "main": "electron.cjs",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "electron": "electron .",
-    "desktop": "npm run dev",
-    "dist": "npm run build && electron-builder --win"
-  },
-  "dependencies": {
-    "@tailwindcss/vite": "^4.1.0",
-    "electron-updater": "^6.8.9",
-    "firebase": "^12.18.0",
-    "lucide-react": "^1.33.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "tailwindcss": "^4.1.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^6.0.4",
-    "electron": "^43.4.0",
-    "electron-builder": "^26.15.0",
-    "eslint": "^9.0.0",
-    "vite": "^8.2.1"
-  },
-  "build": {
-    "appId": "com.vidora.desktop",
-    "productName": "VIDORA",
-    "copyright": "VIDORA",
-    "directories": {
-      "output": "release-final"
-    },
-    "files": [
-      "dist/**/*",
-      "electron.cjs",
-      "preload.cjs",
-      "build/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "backend/VideoDownloaderBackend.exe",
-        "to": "backend/VideoDownloaderBackend.exe"
-      }
-    ],
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "build/vidora.ico",
-      "artifactName": "VIDORA-Setup-${version}.${ext}"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "VIDORA"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "vidoraofficial",
-        "repo": "VIDORA",
-        "releaseType": "prerelease"
-      }
-    ]
-  }
+"name": "vidora-desktop",
+"version": "1.1.2",
+"description": "VIDORA desktop media downloader",
+"private": true,
+"main": "electron.cjs",
+"type": "module",
+"scripts": {
+"dev": "vite",
+"build": "vite build",
+"electron": "electron .",
+"desktop": "npm run dev",
+"dist": "npm run build && electron-builder --win"
+},
+"dependencies": {
+"@tailwindcss/vite": "^4.1.0",
+"electron-updater": "^6.8.9",
+"lucide-react": "^1.33.0",
+"react": "^19.2.0",
+"react-dom": "^19.2.0",
+"tailwindcss": "^4.1.0"
+},
+"devDependencies": {
+"@vitejs/plugin-react": "^6.0.4",
+"electron": "^43.4.0",
+"electron-builder": "^26.15.0",
+"eslint": "^9.0.0",
+"vite": "^8.2.1"
+},
+"build": {
+"appId": "com.vidora.desktop",
+"productName": "VIDORA",
+"copyright": "VIDORA",
+"directories": {
+"output": "release-final"
+},
+"files": [
+"dist/**/*",
+"electron.cjs",
+"preload.cjs",
+"build/**/*"
+],
+"extraResources": [
+{
+"from": "backend/VideoDownloaderBackend.exe",
+"to": "backend/VideoDownloaderBackend.exe"
+},
+{
+"from": "runtime/node",
+"to": "runtime/node"
+},
+{
+"from": "runtime/ffmpeg",
+"to": "runtime/ffmpeg"
+}
+],
+"win": {
+"target": [
+"nsis"
+],
+"icon": "build/vidora.ico",
+"artifactName": "VIDORA-Setup-${version}.${ext}"
+},
+"nsis": {
+"oneClick": false,
+"allowToChangeInstallationDirectory": true,
+"createDesktopShortcut": true,
+"createStartMenuShortcut": true,
+"shortcutName": "VIDORA"
+},
+"publish": [
+{
+"provider": "github",
+"owner": "vidoraofficial",
+"repo": "VIDORA",
+"releaseType": "release"
+}
+]
+}
 }
