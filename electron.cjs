@@ -75,23 +75,60 @@ function getFrontendPath() {
   return path.join(__dirname, 'dist', 'index.html')
 }
 
+function getBackendCandidates() {
+  if (isDev) {
+    return [
+      path.join(__dirname, 'backend', 'VideoDownloaderBackend.exe'),
+      path.join(__dirname, '..', 'backend', 'VideoDownloaderBackend.exe'),
+    ]
+  }
+
+  return [
+    path.join(process.resourcesPath, 'backend', 'VideoDownloaderBackend.exe'),
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'backend', 'VideoDownloaderBackend.exe'),
+  ]
+}
+
 function getBackendPath() {
-  return isDev
-    ? path.join(__dirname, 'backend', 'VideoDownloaderBackend.exe')
-    : path.join(process.resourcesPath, 'backend', 'VideoDownloaderBackend.exe')
+  const candidates = getBackendCandidates()
+  const existing = candidates.find((candidate) => fs.existsSync(candidate))
+  return existing || candidates[0]
+}
+
+function getIconCandidates() {
+  return [
+    path.join(__dirname, 'build', 'vidora.ico'),
+    path.join(process.resourcesPath, 'build', 'vidora.ico'),
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'build', 'vidora.ico'),
+  ]
 }
 
 function getIconPath() {
-  return path.join(__dirname, 'build', 'vidora.ico')
+  const candidates = getIconCandidates()
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0]
 }
 
 /* =========================================================
    BUNDLED RUNTIMES
 ========================================================= */
+function getRuntimeCandidates() {
+  if (isDev) {
+    return [
+      path.join(__dirname, 'runtime'),
+      path.join(__dirname, '..', 'runtime'),
+    ]
+  }
+
+  return [
+    path.join(process.resourcesPath, 'runtime'),
+    path.join(process.resourcesPath, 'app.asar.unpacked', 'runtime'),
+  ]
+}
+
 function getRuntimeRoot() {
-  return isDev
-    ? path.join(__dirname, 'runtime')
-    : path.join(process.resourcesPath, 'runtime')
+  const candidates = getRuntimeCandidates()
+  const working = candidates.find((root) => fs.existsSync(root))
+  return working || candidates[0]
 }
 
 function getBundledRuntimePaths() {
@@ -139,11 +176,14 @@ function startBackend() {
     const message = `[VIDORA] backend not found: ${backendPath}`
     console.error(message)
     writeBackendLog(message)
+    writeBackendLog(`BACKEND_CANDIDATES ${JSON.stringify(getBackendCandidates())}`)
     return false
   }
 
-  const runtimeDirs = [runtime.nodeDir, runtime.ffmpegDir]
-    .filter((directory) => fs.existsSync(directory))
+  const runtimeDirs = [
+    runtime.nodeDir,
+    runtime.ffmpegDir,
+  ].filter((directory) => fs.existsSync(directory))
 
   const env = {
     ...process.env,
@@ -159,6 +199,8 @@ function startBackend() {
 
   const startupInfo = {
     packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
     backendPath,
     backendExists: fs.existsSync(backendPath),
     runtimeRoot: runtime.root,
@@ -172,19 +214,15 @@ function startBackend() {
   writeBackendLog(`START ${JSON.stringify(startupInfo)}`)
 
   try {
-    backendProcess = spawn(
-      backendPath,
-      [],
-      {
-        cwd: path.dirname(backendPath),
-        env,
-        windowsHide: true,
-        detached: false,
-        shell: false,
-        windowsVerbatimArguments: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    )
+    backendProcess = spawn(backendPath, [], {
+      cwd: path.dirname(backendPath),
+      env,
+      windowsHide: true,
+      detached: false,
+      shell: false,
+      windowsVerbatimArguments: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
   } catch (error) {
     console.error('[VIDORA] backend spawn threw:', error)
     writeBackendLog(`SPAWN_THROW ${error?.stack || error}`)
@@ -192,14 +230,17 @@ function startBackend() {
     return false
   }
 
+  backendProcess.stdout?.setEncoding('utf8')
+  backendProcess.stderr?.setEncoding('utf8')
+
   backendProcess.stdout?.on('data', (chunk) => {
-    const text = chunk.toString()
+    const text = String(chunk)
     process.stdout.write(`[VIDORA][backend] ${text}`)
     writeBackendLog(`STDOUT ${text.trimEnd()}`)
   })
 
   backendProcess.stderr?.on('data', (chunk) => {
-    const text = chunk.toString()
+    const text = String(chunk)
     process.stderr.write(`[VIDORA][backend] ${text}`)
     writeBackendLog(`STDERR ${text.trimEnd()}`)
   })
@@ -236,10 +277,17 @@ function checkBackendHealth() {
   return new Promise((resolve) => {
     const request = http.get(
       'http://127.0.0.1:8000/health',
-      { timeout: 1200, headers: { 'Cache-Control': 'no-cache' } },
+      {
+        timeout: 1500,
+        headers: {
+          'Cache-Control': 'no-cache',
+          Connection: 'close',
+        },
+      },
       (response) => {
+        const ok = response.statusCode === 200
         response.resume()
-        resolve(response.statusCode === 200)
+        resolve(ok)
       },
     )
 
@@ -251,7 +299,7 @@ function checkBackendHealth() {
   })
 }
 
-async function waitForBackend(timeoutMs = 30000) {
+async function waitForBackend(timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
@@ -261,12 +309,9 @@ async function waitForBackend(timeoutMs = 30000) {
       return true
     }
 
-    if (!backendProcess && !backendStartingPromise) {
-      // The process may have failed before the first health check.
-      break
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 350))
+    // Do not stop waiting merely because the child briefly disappeared;
+    // ensureBackend() can retry startup below.
+    await new Promise((resolve) => setTimeout(resolve, 400))
   }
 
   writeBackendLog('HEALTHCHECK TIMEOUT')
@@ -279,15 +324,39 @@ async function ensureBackend() {
     return true
   }
 
-  if (!backendStartingPromise) {
-    backendStartingPromise = (async () => {
-      const started = startBackend()
-      if (!started) return false
-      return waitForBackend(30000)
-    })().finally(() => {
-      backendStartingPromise = null
-    })
+  if (backendStartingPromise) {
+    return backendStartingPromise
   }
+
+  backendStartingPromise = (async () => {
+    // Try startup once, then one clean retry. This handles occasional
+    // Windows process-spawn timing issues without requiring manual launch.
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      writeBackendLog(`START_ATTEMPT ${attempt}/2`)
+
+      const started = startBackend()
+      if (!started) {
+        if (attempt === 2) return false
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        continue
+      }
+
+      if (await waitForBackend(45000)) {
+        return true
+      }
+
+      writeBackendLog(`START_ATTEMPT_FAILED ${attempt}/2`)
+      stopBackend()
+
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    }
+
+    return false
+  })().finally(() => {
+    backendStartingPromise = null
+  })
 
   return backendStartingPromise
 }
@@ -581,6 +650,7 @@ async function createWindow() {
   }
 
   const iconPath = getIconPath()
+  const hasIcon = fs.existsSync(iconPath)
 
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -588,7 +658,7 @@ async function createWindow() {
     minWidth: 1050,
     minHeight: 700,
     title: APP_TITLE,
-    icon: iconPath,
+    icon: hasIcon ? iconPath : undefined,
     backgroundColor: '#05070a',
     frame: true,
     resizable: true,
@@ -607,7 +677,7 @@ async function createWindow() {
     },
   })
 
-  if (process.platform === 'win32' && fs.existsSync(iconPath)) {
+  if (process.platform === 'win32' && hasIcon) {
     try { mainWindow.setIcon(iconPath) } catch (error) { console.warn('[VIDORA] setIcon failed:', error) }
   }
 
@@ -655,7 +725,7 @@ async function createWindow() {
 
 /* =========================================================
    FOLDER PICKER
-========================================================= */nipcMain.handle('dialog:choose-folder', async () => {
+========================================================= */ipcMain.handle('dialog:choose-folder', async () => {
   if (!mainWindow) return null
 
   try {
